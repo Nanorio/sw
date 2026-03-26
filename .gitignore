@@ -1,0 +1,7 @@
+*.jpg
+*.log
+*.mp?
+*.pt
+*.png
+*.whl
+weights/test_ncnn_model

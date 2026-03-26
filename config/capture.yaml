@@ -1,0 +1,5 @@
+# config/capture.yaml
+
+# captureMode: camera/one image/one video
+captureMode: camera
+cameraId: 0

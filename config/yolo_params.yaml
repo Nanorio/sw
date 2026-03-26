@@ -1,0 +1,10 @@
+# config/yolo_params.yaml
+
+# predict
+weightName: test_ncnn_model  # 使用ncnn的时间是普通pt的60%
+conf: 0.30
+save: False
+show: False
+stream: False
+verbose: False
+device: 'cpu'
