@@ -3,7 +3,7 @@
 imgChannels: 3 # 固定为3
 blockSize: 3 # 0~10
 minDisparity: 1
-numDisparities: 80
+numDisparities: 40
 P1_factor: 8
 P2_factor: 64 
 disp12MaxDiff: 15

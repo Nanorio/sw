@@ -3,3 +3,7 @@
 # captureMode: camera/one image/one video
 captureMode: camera
 cameraId: 0
+
+# 曝光模式,1为手动,3为自动
+explosureMode: 1
+exposureValue: 50 
