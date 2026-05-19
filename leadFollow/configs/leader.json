@@ -1,0 +1,9 @@
+{
+  "boundary_margin": 3.0,
+  "boundary_speed": 1.0,
+  "boundary_turn_gain": 2.5,
+  "boundary_turn_deadband": 0.1,
+  "cruise_speed": 5.0,
+  "cruise_turn_gain": 0.8,
+  "cruise_turn_period": 25.0
+}

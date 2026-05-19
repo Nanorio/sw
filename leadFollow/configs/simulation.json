@@ -1,0 +1,12 @@
+{
+  "steps": 2000,
+  "dt": 0.1,
+  "pool_size": 30.0,
+  "spawn_range": 25.0,
+  "seed": null,
+  "draw_every": 2,
+  "pause": 0.01,
+  "animate": true,
+  "save": null,
+  "history_limit": 40
+}

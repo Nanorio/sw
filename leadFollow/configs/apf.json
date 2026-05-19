@@ -1,0 +1,6 @@
+{
+  "safe_dist": 3.0,
+  "repulsion_gain": 8.0,
+  "obstacle_min_dist": 0.1,
+  "target_reach_threshold": 0.1
+}
