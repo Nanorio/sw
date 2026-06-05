@@ -2,11 +2,16 @@
   "steps": 2000,
   "dt": 0.1,
   "pool_size": 30.0,
+  "z_min": 0.0,
+  "z_max": 20.0,
   "spawn_range": 25.0,
+  "spawn_z_min": 3.0,
+  "spawn_z_max": 12.0,
   "seed": null,
-  "draw_every": 2,
-  "pause": 0.01,
+  "draw_every": 1,
+  "pause": 0.001,
   "animate": true,
   "save": null,
-  "history_limit": 40
+  "history_limit": 60,
+  "log_positions": true
 }

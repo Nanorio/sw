@@ -1,6 +1,11 @@
 {
   "follower_1_offset_x": -4.0,
   "follower_1_offset_y": 3.5,
+  "follower_1_offset_z": 2.0,
   "follower_2_offset_x": -4.0,
-  "follower_2_offset_y": -3.5
+  "follower_2_offset_y": -3.5,
+  "follower_2_offset_z": 2.0,
+  "follower_3_offset_x": -4.0,
+  "follower_3_offset_y": 0.0,
+  "follower_3_offset_z": -1.0
 }

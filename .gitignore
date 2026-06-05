@@ -5,3 +5,4 @@
 *.png
 *.whl
 weights/test_ncnn_model
+__pycache__

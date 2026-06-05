@@ -2,6 +2,6 @@
   "kp": 1.2,
   "ki": 0.05,
   "kd": 0.2,
-  "max_out": 3.5,
+  "max_out": 8,
   "integral_limit": 2.0
 }

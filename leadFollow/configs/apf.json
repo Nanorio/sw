@@ -1,6 +1,8 @@
 {
   "safe_dist": 3.0,
   "repulsion_gain": 8.0,
+  "vertical_repulsion_scale": 1.0,
   "obstacle_min_dist": 0.1,
-  "target_reach_threshold": 0.1
+  "horizontal_target_reach_threshold": 0.1,
+  "vertical_target_reach_threshold": 0.1
 }

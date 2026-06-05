@@ -3,7 +3,13 @@
   "boundary_speed": 1.0,
   "boundary_turn_gain": 2.5,
   "boundary_turn_deadband": 0.1,
-  "cruise_speed": 5.0,
+  "cruise_speed": 2.0,
   "cruise_turn_gain": 0.8,
-  "cruise_turn_period": 25.0
+  "cruise_turn_period": 25.0,
+  "vertical_enabled": true,
+  "vertical_center": 10.0,
+  "vertical_amplitude": 5.0,
+  "vertical_period": 80.0,
+  "vertical_speed_gain": 0.8,
+  "vertical_max_speed": 1.2
 }
