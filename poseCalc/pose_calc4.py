@@ -2,15 +2,25 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+import os
+import yaml
 
-# ==========================================
-# 1. 物理世界已知条件 (X向右, Y向下, Z向前)
-# ==========================================
-object_points = np.array([
-    [-49.54, -28.6, 0.0],  
-    [ 49.54, -28.6, 0.0],  
-    [  0.00,  58.0, 0.0]   
-], dtype=np.float32)
+object_points = None
+
+def _load_object_points():
+    """从配置文件读取目标物体三维坐标 (单位: mm)"""
+    global object_points
+    if object_points is not None:
+        return object_points
+    config_path = os.path.join(os.path.dirname(__file__), "..", "cap", "config", "object_points.yaml")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"找不到目标点配置文件: {config_path}")
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    object_points = np.array(data["points"], dtype=np.float32)
+    return object_points
+
+object_points = _load_object_points()
 
 # ==========================================
 # 2. 【核心改进】自定义矩阵欧拉角提取

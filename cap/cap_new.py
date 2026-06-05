@@ -81,7 +81,7 @@ class StereoCamera:
         SGBM_Configuration = "./config/SGBM_params.yaml"
 
         if not Path(SGBM_Configuration).exists():
-            raise FileNotFoundError(f"找不到SGBM配置文件: {self.SGBM_Configuration}")
+            raise FileNotFoundError(f"找不到SGBM配置文件: {SGBM_Configuration}")
         
         with open(SGBM_Configuration, 'r', encoding='utf-8') as f:
             params = yaml.safe_load(f)
@@ -305,23 +305,32 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left):
             # 目标的绝对距离
             target_distance = (A[2] + B[2] + C[2]) / 3.0
             
-            # === 核心修改：三维向量叉乘求法向量 (A->B, A->C) ===
-            vec_AB = B - A
-            vec_AC = C - A
-            # Numpy 叉乘直接秒杀 PnP
+            # === 三维向量叉乘求法向量 → 构建正交基 → 提取姿态角 ===
+            # 相机坐标系: X-右, Y-下, Z-前 (OpenCV 惯例)
+            vec_AB = B - A   # 目标"右"方向（顶部两灯连线）
+            vec_AC = C - A   # 目标"下"方向（左上→底部）
+            # 法向量 = AB × AC, 代表目标平面朝向 (指向相机)
             normal_vec = numpy.cross(vec_AB, vec_AC) 
             
-            # 归一化法向量
+            # 归一化法向量 → 目标坐标系的 Z 轴
             norm_length = numpy.linalg.norm(normal_vec)
             if norm_length > 0:
                 normal_vec = normal_vec / norm_length
                 nx, ny, nz = normal_vec
                 
-                # 计算姿态角 (单位转为角度)
+                # Yaw (偏航): 法向量在 XZ 平面上的方位角
+                # nx/nz → 法向量绕 Y 轴的偏转
                 yaw = math.degrees(math.atan2(nx, nz))
+                
+                # Pitch (俯仰): 法向量与水平面的夹角
+                # 前倾时 ny < 0, 取负使 pitch > 0 表示低头
                 pitch = math.degrees(math.asin(numpy.clip(-ny, -1.0, 1.0)))
                 
-                # [修正] Roll：看顶部两盏灯 A 和 B 的连线是否水平
+                # Roll (横滚): 顶部两灯连线在相机 XY 平面内的转角
+                # vec_AB 是立体深度恢复的三维向量, 包含真实 X/Y/Z 分量,
+                # 而非 2D 像素坐标。使用 3D 向量的关键优势:
+                # 在大俯仰/大偏航角下, 2D 像素投影会缩短, 导致角精度骤降;
+                # 而 3D 向量保留完整分量, 始终给出正确的几何角度。
                 roll = math.degrees(math.atan2(vec_AB[1], vec_AB[0]))
                 
                 # 终端输出

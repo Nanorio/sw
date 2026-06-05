@@ -3,14 +3,25 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+import os
+import yaml
 
-# 已知物理世界三点坐标 (单位：mm)
-# 可根据你的实际目标物体修改
-OBJECT_POINTS_MM = np.array([
-    [-49.54, -28.6, 0.0],   # 左下方点
-    [ 49.54, -28.6, 0.0],   # 右下方点
-    [  0.00,  58.0, 0.0]    # 上方点
-], dtype=np.float32)
+OBJECT_POINTS_MM = None
+
+def _load_object_points():
+    """从配置文件读取目标物体三维坐标 (单位: mm)"""
+    global OBJECT_POINTS_MM
+    if OBJECT_POINTS_MM is not None:
+        return OBJECT_POINTS_MM
+    config_path = os.path.join(os.path.dirname(__file__), "..", "cap", "config", "object_points.yaml")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"找不到目标点配置文件: {config_path}")
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    OBJECT_POINTS_MM = np.array(data["points"], dtype=np.float32)
+    return OBJECT_POINTS_MM
+
+OBJECT_POINTS_MM = _load_object_points()
 
 def calculate_pose_sqpnp(image_points, camera_matrix, dist_coeffs):
     """
