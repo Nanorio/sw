@@ -175,7 +175,7 @@ class StereoSGBMTester:
             self.clicked_point = (x, y)
             # 在终端同步输出一次信息
             if hasattr(self, 'xyz'):
-                z = -self.xyz[y, x, 2]*0.71
+                z = self.xyz[y, x, 2]*0.71
                 print(f"[UI 探测] 像素坐标: ({x}, {y}) | 对应深度 Z: {z:.2f} mm")
 
 
@@ -213,7 +213,7 @@ if __name__ == '__main__':
             if tester.clicked_point is not None:
                 cx, cy = tester.clicked_point
                 # 取出该点的 Z 轴距离
-                z_val = tester.xyz[cy, cx, 2]
+                z_val = tester.xyz[cy, cx, 2]*0.71
                 
                 # 判定深度是否有效 (过滤无效的极大值或负数)
                 if 0 < z_val < 10000:
