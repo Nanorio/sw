@@ -1,9 +1,8 @@
-# config/capture.yaml
-
-# captureMode: camera/one image/one video
-captureMode: camera
 cameraId: 0
-
-# 曝光模式,1为手动,3为自动
-explosureMode: 1
-exposureValue: 50 
+captureMode: camera
+exposure:
+  cameraRange:
+  - 3
+  - 2047
+  manualValue: 35
+  mode: auto  # auto或manual

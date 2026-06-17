@@ -1,12 +1,12 @@
 # config/SGBM_params.yaml
 
 imgChannels: 3 # 固定为3
-blockSize: 3 # 0~10
-minDisparity: 1
-numDisparities: 40
+blockSize: 5 # 区块大小，必须是奇数，通常在3-11之间
+minDisparity: 0
+numDisparities: 96 # 必须是16的倍数
 P1_factor: 8
 P2_factor: 64 
-disp12MaxDiff: 15
+disp12MaxDiff: 1
 preFilterCap: 63
 uniquenessRatio: 10
 speckleWindowSize: 100
@@ -18,4 +18,4 @@ modeCategory:
   - STEREO_SGBM_MODE_SGBM
   - STEREO_SGBM_MODE_HH
 
-mode: STEREO_SGBM_MODE_HH4
+mode: STEREO_SGBM_MODE_SGBM

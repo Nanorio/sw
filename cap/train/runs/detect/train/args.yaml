@@ -1,12 +1,12 @@
 task: detect
 mode: train
-model: /home/nvidia/CAP/weights/best.pt
+model: yolov8n.pt
 data: yolov8.yaml
-epochs: 100
+epochs: 300
 time: null
 patience: 100
-batch: 32
-imgsz: 1080
+batch: -1
+imgsz: 640
 save: true
 save_period: -1
 cache: false
@@ -106,4 +106,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: /home/nvidia/CAP/train/runs/detect/train
+save_dir: /home/nvidia/CAP/cap/train/runs/detect/train

@@ -1,7 +1,7 @@
 # config/yolo_params.yaml
 
 # predict
-weightName: best1.engine  # 使用ncnn的时间是普通pt的60%
+weightName: best.engine  # 使用ncnn的时间是普通pt的60%
 conf: 0.30
 save: False
 show: False
