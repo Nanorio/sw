@@ -7,6 +7,7 @@ from pathlib import Path
 import cv2
 import math
 from ultralytics import YOLO
+from concurrent.futures import ThreadPoolExecutor
 #<<<
 
 class StereoCamera:
@@ -418,14 +419,19 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left):
             # 如果灯不够3个，或者有几个算不出深度，在终端提示一下，但不妨碍下方保存图片
             print(f"当前找到 {len(boxes)} 个灯，成功计算深度的有 {len(centers_2d_data)} 个。不足以解算姿态，跳过姿态解算。")
 
-        # === [核心修改：将保存逻辑移到外层] ===
-        # 只要代码走进了 if len(boxes) >= 1，就一定会执行到这里进行图片保存
         save_path = f"{outcome_action.save_dir}/{outcome_action.seq_count:04d}.jpg"
         cv2.imwrite(save_path, save_img)
         outcome_action.seq_count += 1
+
+        return save_img
             
     else:
         print("当前没有识别到任何灯，不保存图片。")
+        # 即使无检测也返回一张带提示的图，用于实时显示
+        display_img = rectify_bgr_left.copy()
+        cv2.putText(display_img, "No detection", (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 2)
+        return display_img
 # def outcome_action(results, xyz_matrix, rectify_bgr_left):
 #     # 1. 初始化保存目录（利用函数静态属性，只执行一次）
 #     if not hasattr(outcome_action, "seq_count"):
@@ -562,6 +568,9 @@ if __name__ == '__main__':
     cam = StereoCamera()
     yolo = YOLOV8()
     print("\n\n————————————————————\n开始检测\n————————————————————")
+
+    # 复用线程池，避免每帧重建开销
+    executor = ThreadPoolExecutor(max_workers=2)
     
     while True:
         loop_start = datetime.datetime.now()
@@ -573,15 +582,30 @@ if __name__ == '__main__':
             break
 
         try:
-            # 严格按照顺序执行处理流水线
-            cam.rectify_images() 
-            yolo.predict(cam.rectify_bgr_left) 
-            cam.cpt_disparity() 
-            cam.cpt_xyz() 
-            
-            # 将数据喂给咱们刚写的全能分析函数
-            outcome_action(yolo.results, cam.xyz, cam.rectify_bgr_left)
-            
+            cam.rectify_images()
+
+            # YOLO (GPU) 与 SGBM (CPU) 无数据依赖，并发执行
+            fut_yolo = executor.submit(yolo.predict, cam.rectify_bgr_left)
+            fut_sgbm = executor.submit(cam.cpt_disparity)
+
+            # 确保两者都完成。即使一个异常，也要等另一个结束，
+            # 否则回下一帧时旧 SGBM 仍在跑，会跟新任务抢写 cam.disparity
+            excs = []
+            for fut in [fut_yolo, fut_sgbm]:
+                try:
+                    fut.result()
+                except Exception as e:
+                    excs.append(e)
+            if excs:
+                raise Exception("; ".join(str(e) for e in excs))
+
+            cam.cpt_xyz()
+            display_img = outcome_action(yolo.results, cam.xyz, cam.rectify_bgr_left)
+            cv2.imshow("CAP Detection", display_img)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                print("用户按下 q，退出检测")
+                break
+
         except Exception as e:
             # [防爆破机制 2]: SGBM 或 remap 哪怕偶尔抽风报错，也能被捕获，不会导致整个程序闪退
             print(f"处理这一帧时发生异常: {e}")
