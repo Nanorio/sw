@@ -17,7 +17,7 @@ class StereoCamera:
         self._rectify_maps_init()
         self._SGBM_param_init()
         self._capture_init()
-        self._detect_exposure_range(0)
+        # self._detect_exposure_range(0)
 
     def _load_camera_configuration(self):
         """初始化双目相机参数配置""" 
@@ -218,7 +218,7 @@ class StereoCamera:
         disparity_float = self.disparity.astype(numpy.float32) / 16.0
         self.xyz = cv2.reprojectImageTo3D(disparity_float, self.Q, handleMissingValues=True)
 
-class YOLO():
+class YOLOV8():
 
     def __init__(self):
         self._predict_init()
@@ -560,7 +560,7 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left):
 if __name__ == '__main__':
 
     cam = StereoCamera()
-    yolo = YOLO()
+    yolo = YOLOV8()
     print("\n\n————————————————————\n开始检测\n————————————————————")
     
     while True:
