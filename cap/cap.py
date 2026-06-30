@@ -8,7 +8,66 @@ import cv2
 import math
 from ultralytics import YOLO
 from concurrent.futures import ThreadPoolExecutor
+import zmq
+import struct
+from multiprocessing import shared_memory
 #<<<
+
+
+class ZMQCapture:
+    """基于共享内存 + ZMQ 通知的零拷贝帧获取器。read() 接口兼容 cv2.VideoCapture。"""
+
+    def __init__(self, endpoint, img_w, img_h, shm_name="cap_shm", timeout_ms=3000):
+        # ZMQ 通知通道（仅 8 字节/帧）
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.SUB)
+        self.socket.setsockopt(zmq.RCVHWM, 4)
+        self.socket.setsockopt_string(zmq.SUBSCRIBE, "")
+        self.socket.connect(endpoint)
+        self.timeout_ms = timeout_ms
+
+        # 共享内存（与 camera_server 映射同一块物理内存）
+        cap_w = img_w * 2
+        cap_h = img_h
+        frame_sz = cap_w * cap_h * 3
+        self.shm = shared_memory.SharedMemory(name=shm_name)
+        self.counter = numpy.ndarray((1,), dtype=numpy.int64,
+                                      buffer=self.shm.buf[:8])
+        self.buf0 = numpy.ndarray((cap_h, cap_w, 3), dtype=numpy.uint8,
+                                   buffer=self.shm.buf[8:8+frame_sz])
+        self.buf1 = numpy.ndarray((cap_h, cap_w, 3), dtype=numpy.uint8,
+                                   buffer=self.shm.buf[8+frame_sz:])
+
+        self._last_counter = 0
+        self._frame = None
+
+    def read(self):
+        """返回 (retval, frame)，frame 是共享内存的直接视图（零拷贝）。
+           get_split_img 随后会通过 .copy() 把左右半图拷到 bgr_left/right。"""
+        if self.socket.poll(timeout=self.timeout_ms):
+            msg = self.socket.recv()
+            counter = struct.unpack("!q", msg)[0]
+            # camera_server 写入的是 buffer[counter % 2]，
+            # 所以安全可读的是 buffer[(counter - 1) % 2]
+            safe = self.buf0 if (counter - 1) % 2 == 0 else self.buf1
+            self._frame = safe
+            self._last_counter = counter
+            return True, self._frame
+
+        # 超时：返回最后一帧保底
+        if self._frame is not None:
+            return True, self._frame
+        return False, None
+
+    def isOpened(self):
+        return True
+
+    def release(self):
+        self.socket.close()
+        self.context.term()
+        self.shm.close()           # 只减引用计数，不 unlink（归 camera_server 管）
+        self._frame = None
+
 
 class StereoCamera:
 
@@ -156,6 +215,11 @@ class StereoCamera:
                 # else:
                 #     self.captureData.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)   # 0.25 = 自动模式 (V4L2)
                 #     print(">>> 自动曝光 <<<")
+            elif params['captureMode'] == 'zmq':
+                print(">>> 当前输入源为共享内存 + ZMQ 通知 <<<")
+                zmq_port = params.get('zmqPort', 5555)
+                endpoint = f"tcp://localhost:{zmq_port}"
+                self.captureData = ZMQCapture(endpoint, self.imageSize[0], self.imageSize[1])
             elif params['captureMode'] == 'one image':
                 print(">>> 当前输入源为静态图片 <<<")
                 self.captureData = cv2.VideoCapture('./staticSource/image/test.jpg')
@@ -618,3 +682,8 @@ if __name__ == '__main__':
         hz = 1.0 / total_seconds if total_seconds > 0 else 0
         print(f">>> 单次循环耗时: {total_seconds:.4f}s | 速率: {hz:.2f} Hz")
         print("-" * 50)
+
+    # 清理
+    cam.captureData.release()
+    cv2.destroyAllWindows()
+    print("程序退出")
