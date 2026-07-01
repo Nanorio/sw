@@ -1,5 +1,5 @@
-cameraId: 0
-captureMode: zmq #camera或zmq
+cameraId: 2
+captureMode: camera #camera或zmq
 zmqPort: 5555
 exposure:
   cameraRange:

@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
 """
-相机帧发布服务 — 共享内存 + ZMQ 通知，零拷贝帧分发。
-启动:  python3 camera_server.py
+相机帧发布服务 —— 读真实相机 → v4l2loopback 虚拟设备。
+任何支持 V4L2 的软件打开 /dev/video2 即可获取实时画面。
+
+前置安装（边缘端跑一次）:
+  sudo apt install ffmpeg v4l2loopback-dkms
+  sudo modprobe v4l2loopback video_nr=2 card_label="CAM_virtual" exclusive_caps=1
+
+启动:
+  python3 camera_server.py
 """
 
 import cv2
-import numpy
-import zmq
-import struct
-import yaml
+import subprocess
 import signal
 import sys
+import yaml
+import time
 from pathlib import Path
-from multiprocessing import shared_memory
 
 
 def main():
     # ========== 读取配置 ==========
     cfg_path = Path("./config/capture.yaml")
     if not cfg_path.exists():
-        print(f"[camera_server] 找不到配置文件: {cfg_path}")
+        print(f"[camera_server] 找不到 {cfg_path}")
         sys.exit(1)
 
     with open(cfg_path, "r", encoding="utf-8") as f:
@@ -29,13 +34,14 @@ def main():
     with open(calib_path, "r", encoding="utf-8") as f:
         calib = yaml.safe_load(f)
 
-    img_w, img_h = calib["imageSize"]
-    camera_id    = cfg.get("cameraId", 0)
-    zmq_port     = cfg.get("zmqPort", 5555)
+    img_w, img_h = calib["imageSize"]                     # 单目尺寸
+    real_id      = cfg.get("v4l2", {}).get("realDeviceId", 0)
+    virt_id      = cfg.get("v4l2", {}).get("virtualDeviceId", 2)
+    virt_dev     = f"/dev/video{virt_id}"
 
-    # ========== 打开相机 ==========
-    print(f"[camera_server] 打开相机 /dev/video{camera_id} ...")
-    cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
+    # ========== 打开真实相机 ==========
+    print(f"[camera_server] 打开 /dev/video{real_id} ...")
+    cap = cv2.VideoCapture(real_id, cv2.CAP_V4L2)
     if not cap.isOpened():
         print("[camera_server] 相机打开失败！")
         sys.exit(1)
@@ -54,82 +60,63 @@ def main():
         cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
         print("[camera_server] 自动曝光")
 
-    # ========== 共享内存（双缓冲） ==========
-    cap_w     = img_w * 2
-    cap_h     = img_h
-    frame_sz  = cap_w * cap_h * 3          # 单帧字节数
-    head_sz   = 8                           # int64 counter
-    shm_size  = head_sz + frame_sz * 2      # 双缓冲总大小
-
-    SHM_NAME = "cap_shm"
-    try:
-        shm = shared_memory.SharedMemory(name=SHM_NAME, create=True, size=shm_size)
-    except FileExistsError:
-        # 上次残留，清理后重建
-        old = shared_memory.SharedMemory(name=SHM_NAME)
-        old.close()
-        old.unlink()
-        shm = shared_memory.SharedMemory(name=SHM_NAME, create=True, size=shm_size)
-
-    # numpy 视图
-    counter = numpy.ndarray((1,), dtype=numpy.int64, buffer=shm.buf[:head_sz])
-    buf0    = numpy.ndarray((cap_h, cap_w, 3), dtype=numpy.uint8,
-                            buffer=shm.buf[head_sz:head_sz+frame_sz])
-    buf1    = numpy.ndarray((cap_h, cap_w, 3), dtype=numpy.uint8,
-                            buffer=shm.buf[head_sz+frame_sz:])
-
-    counter[0] = 0
-    write_idx  = 0
-    print(f"[camera_server] 共享内存: {SHM_NAME} ({shm_size} bytes)")
+    # 读第一帧确认实际尺寸
+    ret, sample = cap.read()
+    if not ret:
+        print("[camera_server] 无法获取第一帧，退出")
+        sys.exit(1)
+    cap_w = sample.shape[1]
+    cap_h = sample.shape[0]
     print(f"[camera_server] 帧尺寸: {cap_w} x {cap_h}")
 
-    # ========== ZMQ 通知通道 ==========
-    context = zmq.Context()
-    pub = context.socket(zmq.PUB)
-    pub.setsockopt(zmq.SNDHWM, 4)
-    addr = f"tcp://*:{zmq_port}"
-    pub.bind(addr)
-    print(f"[camera_server] ZMQ 通知: {addr} (每帧仅 8 字节)")
+    # ========== 启动 ffmpeg → 虚拟设备 ==========
+    print(f"[camera_server] 启动 ffmpeg → {virt_dev} ...")
+    ffmpeg = subprocess.Popen(
+        ["ffmpeg", "-y",
+         "-f", "rawvideo",
+         "-pixel_format", "bgr24",
+         "-video_size", f"{cap_w}x{cap_h}",
+         "-framerate", "30",
+         "-i", "pipe:",
+         "-f", "v4l2",
+         "-pix_fmt", "yuv420p",
+         virt_dev],
+        stdin=subprocess.PIPE,
+        stderr=subprocess.DEVNULL   # 设为 sys.stderr 可看 ffmpeg 日志
+    )
+    print(f"[camera_server] 已运行，{virt_dev} 可被任意 V4L2 软件打开")
 
     # ========== 信号处理 ==========
     running = True
     def shutdown(sig, frame):
         nonlocal running
-        print("\n[camera_server] 收到退出信号，关闭服务...")
+        print("\n[camera_server] 关闭...")
         running = False
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
     # ========== 主循环 ==========
     count = 0
+    last_log = time.time()
+
     while running:
         ret, frame = cap.read()
         if not ret:
-            print("[camera_server] 读帧失败，重试中...")
+            print("[camera_server] 读帧失败，重试...")
             cv2.waitKey(100)
             continue
 
-        # 写入当前缓冲
-        target = buf0 if write_idx == 0 else buf1
-        numpy.copyto(target, frame)
-
-        # 翻写缓冲索引后更新共享计数器
-        write_idx = 1 - write_idx
-        counter[0] = numpy.int64(count + 1)
-
-        # ZMQ 通知（仅 8 字节帧号，远轻于发整帧）
-        pub.send(struct.pack("!q", counter[0]))
-
+        ffmpeg.stdin.write(frame.tobytes())
         count += 1
-        if count % 200 == 0:
-            print(f"[camera_server] 已发布 {count} 帧")
+
+        if time.time() - last_log >= 10.0:
+            print(f"[camera_server] 已转发 {count} 帧")
+            last_log = time.time()
 
     # ========== 清理 ==========
+    ffmpeg.stdin.close()
+    ffmpeg.wait()
     cap.release()
-    pub.close()
-    context.term()
-    shm.close()
-    shm.unlink()
     print("[camera_server] 已停止")
 
 
