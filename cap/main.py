@@ -7,6 +7,7 @@ import atexit
 import signal
 import time
 import cv2
+import numpy
 from cap_init import StereoCamera
 from yolo_detector import YOLOV8
 from outcome import outcome_action
@@ -67,6 +68,21 @@ def main():
                 yolo.predict(cam.rectify_bgr_left)
                 cam.cpt_disparity()
                 cam.cpt_xyz()
+
+                # 深度渲染图显示（与 CAP Detection 窗口同一校正坐标系）
+                mask_valid = cv2.compare(cam.disparity, 1, cv2.CMP_GE)
+                disp_f32 = cam.disparity.astype(numpy.float32)
+                # 裁剪顶部 1% 异常值，避免有效视差被离群点压缩
+                valid_vals = disp_f32[mask_valid > 0]
+                if len(valid_vals) > 0:
+                    upper = numpy.percentile(valid_vals, 99)
+                    disp_f32 = numpy.clip(disp_f32, 0, upper)
+                disp_norm = cv2.normalize(
+                    disp_f32, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U
+                )
+                disp_color = cv2.applyColorMap(disp_norm, cv2.COLORMAP_JET)
+                disp_color = cv2.bitwise_and(disp_color, disp_color, mask=mask_valid)
+                cv2.imshow("SGBM Depth", disp_color)
 
                 display_img = outcome_action(
                     yolo.results, cam.xyz, cam.rectify_bgr_left

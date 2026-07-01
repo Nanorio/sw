@@ -51,11 +51,17 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left):
             if not os.path.exists(dir_name):
                 os.makedirs(dir_name)
                 outcome_action.save_dir = dir_name
+                os.makedirs(os.path.join(dir_name, "original"))
                 break
             run_idx += 1
 
     boxes = results[0].boxes
     
+    # 保存原始图（无标注），用于训练
+    if len(boxes) >= 1:
+        raw_path = f"{outcome_action.save_dir}/original/{outcome_action.seq_count:04d}.jpg"
+        cv2.imwrite(raw_path, rectify_bgr_left)
+
     # === [核心修改] 防漏帧机制：只要识别数 >= 1，就准备保存图片 ===
     if len(boxes) >= 1:
         save_img = rectify_bgr_left.copy()
