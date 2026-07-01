@@ -79,12 +79,12 @@ def main():
          "-framerate", "30",
          "-i", "pipe:",
          "-f", "v4l2",
-         "-pix_fmt", "yuv420p",
+         "-pix_fmt", "yuyv422",
          virt_dev],
         stdin=subprocess.PIPE,
-        stderr=subprocess.DEVNULL   # 设为 sys.stderr 可看 ffmpeg 日志
+        # stderr=None 继承终端，能看到 ffmpeg 具体错误
     )
-    print(f"[camera_server] 已运行，{virt_dev} 可被任意 V4L2 软件打开")
+    print(f"[camera_server] 已运行，{virt_dev} 可被任意 V4L2 软件打开 (YUYV 422)")
 
     # ========== 信号处理 ==========
     running = True
@@ -106,7 +106,12 @@ def main():
             cv2.waitKey(100)
             continue
 
-        ffmpeg.stdin.write(frame.tobytes())
+        try:
+            ffmpeg.stdin.write(frame.tobytes())
+        except BrokenPipeError:
+            print(f"[camera_server] ffmpeg 崩溃！请检查以上 ffmpeg 错误信息")
+            print(f"[camera_server] 是否已执行: sudo modprobe v4l2loopback video_nr=2")
+            break
         count += 1
 
         if time.time() - last_log >= 10.0:
