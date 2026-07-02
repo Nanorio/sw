@@ -69,6 +69,12 @@ def main():
                 cam.cpt_disparity()
                 cam.cpt_xyz()
 
+                # 计算帧率
+                _loop_end = datetime.datetime.now()
+                _duration = _loop_end - loop_start
+                _total_sec = _duration.total_seconds()
+                current_fps = 1.0 / _total_sec if _total_sec > 0 else 0
+
                 # 深度渲染图显示（与 CAP Detection 窗口同一校正坐标系）
                 mask_valid = cv2.compare(cam.disparity, 1, cv2.CMP_GE)
                 disp_f32 = cam.disparity.astype(numpy.float32)
@@ -82,10 +88,12 @@ def main():
                 )
                 disp_color = cv2.applyColorMap(disp_norm, cv2.COLORMAP_JET)
                 disp_color = cv2.bitwise_and(disp_color, disp_color, mask=mask_valid)
+                cv2.putText(disp_color, f"FPS: {current_fps:.1f}", (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                 cv2.imshow("SGBM Depth", disp_color)
 
                 display_img = outcome_action(
-                    yolo.results, cam.xyz, cam.rectify_bgr_left
+                    yolo.results, cam.xyz, cam.rectify_bgr_left, current_fps
                 )
                 cv2.imshow(win_name, display_img)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -95,13 +103,6 @@ def main():
             except Exception as e:
                 print(f"处理这一帧时发生异常: {e}")
                 continue
-
-            loop_end = datetime.datetime.now()
-            duration = loop_end - loop_start
-            total_seconds = duration.total_seconds()
-            hz = 1.0 / total_seconds if total_seconds > 0 else 0
-            print(f">>> 单次循环耗时: {total_seconds:.4f}s | 速率: {hz:.2f} Hz")
-            print("-" * 50)
 
     except KeyboardInterrupt:
         print("\n收到 Ctrl+C，退出检测")

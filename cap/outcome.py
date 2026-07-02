@@ -4,7 +4,31 @@ import datetime
 import numpy
 import cv2
 import math
+import yaml
+from dataclasses import dataclass
+from pathlib import Path
 #<<<
+
+# ========== 深度修正系数（从 SGBM_params.yaml 读取） ==========
+_DEPTH_COR_FACTOR = 0.71
+try:
+    with open("./config/SGBM_params.yaml", "r", encoding="utf-8") as _f:
+        _DEPTH_COR_FACTOR = yaml.safe_load(_f).get("depthCorFactor", _DEPTH_COR_FACTOR)
+except Exception:
+    pass
+
+
+@dataclass
+class Target_Point:
+    """检测到的目标点：像素坐标 + 3D 坐标（已乘深度修正系数）"""
+    cx: int
+    cy: int
+    pt_3d: numpy.ndarray   # [x, y, z] 单位 mm
+
+    @property
+    def z(self) -> float:
+        return float(self.pt_3d[2])
+
 
 def get_robust_depth(xyz_matrix, x1, y1, x2, y2):
     """区域中位数滤波，提取最稳的 3D 坐标 (附带详细Debug输出)"""
@@ -36,10 +60,10 @@ def get_robust_depth(xyz_matrix, x1, y1, x2, y2):
         
     median_x = numpy.median(valid_pts[:, 0])
     median_y = numpy.median(valid_pts[:, 1])
-    median_z = numpy.median(valid_pts[:, 2])
+    median_z = numpy.median(valid_pts[:, 2]) * _DEPTH_COR_FACTOR
     
     return numpy.array([median_x, median_y, median_z])
-def outcome_action(results, xyz_matrix, rectify_bgr_left):
+def outcome_action(results, xyz_matrix, rectify_bgr_left, fps=0.0):
     # 1. 初始化保存目录（利用函数静态属性，只执行一次）
     if not hasattr(outcome_action, "seq_count"):
         outcome_action.seq_count = 1
@@ -62,103 +86,80 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left):
         raw_path = f"{outcome_action.save_dir}/original/{outcome_action.seq_count:04d}.jpg"
         cv2.imwrite(raw_path, rectify_bgr_left)
 
-    # === [核心修改] 防漏帧机制：只要识别数 >= 1，就准备保存图片 ===
+    display_img = rectify_bgr_left.copy()
+    
+    # ===== 光轴十字线（主点位置） =====
+    h_i, w_i = display_img.shape[:2]
+    cx_i, cy_i = 331, 234  # 标定主点 (left_matrix 经转置后)
+    cv2.line(display_img, (cx_i, 0), (cx_i, h_i - 1), (0, 255, 0), 1)
+    cv2.line(display_img, (0, cy_i), (w_i - 1, cy_i), (0, 255, 0), 1)
+    cv2.circle(display_img, (cx_i, cy_i), 5, (0, 255, 0), 2)
+    
     if len(boxes) >= 1:
-        save_img = rectify_bgr_left.copy()
+        blue_pts = []   # BlueLight (class 0) → 红色
+        green_pts = []  # GreenLight (class 1) → 紫色
+        targets_3d = []  # 有有效深度的点 → 解算相对光轴角度
         
-        # 将所有的框按照 YOLO 的置信度 (conf) 从高到低进行排序
-        sorted_boxes = sorted(boxes, key=lambda b: b.conf[0].item(), reverse=True)
-        
-        # 最多依然只切取前 3 名“学霸”去算姿态，如果只有 1 个或 2 个，就取 1 个或 2 个
-        best_boxes = sorted_boxes[:3]
-        
-        centers_2d_data = [] 
-        
-        # 遍历这几个靠谱的框
-        for target in best_boxes:
+        for target in boxes:
+            cls = int(target.cls[0])
             x1, y1, x2, y2 = map(int, target.xyxy[0])
             cx = int((x1 + x2) / 2)
             cy = int((y1 + y2) / 2)
             
-            # 使用中位数滤波获取该灯的 3D 坐标
+            pt = (cx, cy)
+            if cls == 0:         # BlueLight
+                blue_pts.append(pt)
+            else:                 # GreenLight
+                green_pts.append(pt)
+            
+            # 计算该点 3D 坐标 → 解算相对相机光轴的角度
             pt_3d = get_robust_depth(xyz_matrix, x1, y1, x2, y2)
-            
             if pt_3d is not None:
-                centers_2d_data.append({'cx': cx, 'cy': cy, 'pt_3d': pt_3d})
-                # [新增]: 只要算出了深度，无论凑没凑齐 3 个，都把当前灯的 Z 轴画出来方便观察
-                cv2.putText(save_img, f"Z:{pt_3d[2]:.0f}", (cx-20, cy-15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                
-        # === 只有这 3 个最靠谱的灯的三维坐标都提取成功了，才进行姿态解算 ===
-        if len(centers_2d_data) == 3:
-            # 按 cy (画面Y坐标) 升序排列
-            centers_2d_data.sort(key=lambda item: item['cy'])
-            
-            # 在倒三角里，cy最大的（排在最后的）是底部的那 1 个灯
-            bottom_light_data = centers_2d_data[2] # C点数据
-            
-            # 使用红色标注底部灯的参考点，半径更大，实心
-            cv2.circle(save_img, (bottom_light_data['cx'], bottom_light_data['cy']), 8, (0, 0, 255), -1) 
-            
-            # 前两个是顶部的 2 个灯，按 cx 排序分出左右
-            top_lights_data = centers_2d_data[:2]
-            top_lights_data.sort(key=lambda item: item['cx'])
-            left_light_data = top_lights_data[0]   # 左上角的灯 (A点数据)
-            right_light_data = top_lights_data[1]  # 右上角的灯 (B点数据)
-            
-            # 使用绿色标注顶部两个灯的参考点
-            cv2.circle(save_img, (left_light_data['cx'], left_light_data['cy']), 5, (0, 255, 0), -1) 
-            cv2.circle(save_img, (right_light_data['cx'], right_light_data['cy']), 5, (0, 255, 0), -1) 
-            
-            # 提取 3D 点
-            A = left_light_data['pt_3d']
-            B = right_light_data['pt_3d']
-            C = bottom_light_data['pt_3d']
-            
-            # 目标的绝对距离
-            target_distance = (A[2] + B[2] + C[2]) / 3.0
-            
-            # === 三维向量叉乘求法向量 → 构建正交基 → 提取姿态角 ===
-            vec_AB = B - A   
-            vec_AC = C - A   
-            normal_vec = numpy.cross(vec_AB, vec_AC) 
-            
-            norm_length = numpy.linalg.norm(normal_vec)
-            if norm_length > 0:
-                normal_vec = normal_vec / norm_length
-                nx, ny, nz = normal_vec
-                
-                yaw = math.degrees(math.atan2(nx, nz))
-                pitch = math.degrees(math.asin(numpy.clip(-ny, -1.0, 1.0)))
-                roll = math.degrees(math.atan2(vec_AB[1], vec_AB[0]))
-                
-                print(f"🎯 锁定目标！距离: {target_distance:.2f} mm")
-                print(f"✈️ 姿态 -> 偏航(Yaw): {yaw:.1f}° | 俯仰(Pitch): {pitch:.1f}° | 横滚(Roll): {roll:.1f}°")
-                
-                # A -> B 顶边 (绿色)
-                cv2.line(save_img, (left_light_data['cx'], left_light_data['cy']), (right_light_data['cx'], right_light_data['cy']), (0, 255, 0), 2)
-                # A -> C 左侧斜边 (红色)
-                cv2.line(save_img, (left_light_data['cx'], left_light_data['cy']), (bottom_light_data['cx'], bottom_light_data['cy']), (0, 0, 255), 2)
-                # B -> C 右侧斜边 (蓝色)
-                cv2.line(save_img, (right_light_data['cx'], right_light_data['cy']), (bottom_light_data['cx'], bottom_light_data['cy']), (255, 0, 0), 2)
-
-                # 打水印
-                cv2.putText(save_img, f"Dist: {target_distance:.0f}mm", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                cv2.putText(save_img, f"Y:{yaw:.1f} P:{pitch:.1f} R:{roll:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-
-        else:
-            # 如果灯不够3个，或者有几个算不出深度，在终端提示一下，但不妨碍下方保存图片
-            print(f"当前找到 {len(boxes)} 个灯，成功计算深度的有 {len(centers_2d_data)} 个。不足以解算姿态，跳过姿态解算。")
-
+                targets_3d.append(Target_Point(cx=cx, cy=cy, pt_3d=pt_3d))
+                h_ang = math.degrees(math.atan2(pt_3d[0], pt_3d[2]))
+                v_ang = math.degrees(math.atan2(-pt_3d[1], pt_3d[2]))
+                cv2.putText(display_img, f"Yaw:{h_ang:+.1f} Pitch:{v_ang:+.1f}",
+                            (cx + 10, cy), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.45, (0, 255, 255), 1)
+                cv2.putText(display_img, f"Z:{pt_3d[2]:.0f}mm",
+                            (cx + 10, cy + 16), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.45, (0, 255, 255), 1)
+        
+        # 画点
+        for pt in blue_pts:
+            cv2.circle(display_img, pt, 6, (0, 0, 255), -1)       # 红色
+        for pt in green_pts:
+            cv2.circle(display_img, pt, 6, (255, 0, 255), -1)     # 紫色
+        
+        # 画线：紫点 ↔ 红点 = 白色
+        for g_pt in green_pts:
+            for b_pt in blue_pts:
+                cv2.line(display_img, g_pt, b_pt, (255, 255, 255), 2)
+        
+        # 画线：红点 ↔ 红点 = 黑色
+        for i in range(len(blue_pts)):
+            for j in range(i + 1, len(blue_pts)):
+                cv2.line(display_img, blue_pts[i], blue_pts[j], (0, 0, 0), 2)
+        
+        # ===== 汇总：最近目标点相对相机光轴的角度 =====
+        if len(targets_3d) >= 1:
+            nearest = min(targets_3d, key=lambda p: numpy.linalg.norm(p.pt_3d))
+            Xn, Yn, Zn = nearest.pt_3d
+            hn = math.degrees(math.atan2(Xn, Zn))
+            vn = math.degrees(math.atan2(-Yn, Zn))
+            print(f"📐 最近点 → Yaw:{hn:+.1f} Pitch:{vn:+.1f}  X:{Xn:.0f} Y:{Yn:.0f} Z:{Zn:.0f}mm")
+            cv2.putText(display_img, f"Yaw:{hn:+.1f}  Pitch:{vn:+.1f}", (20, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            cv2.putText(display_img, f"Z:{Zn:.0f}mm  X:{Xn:.0f}  Y:{Yn:.0f}", (20, 95),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        
+        # 保存标注图
         save_path = f"{outcome_action.save_dir}/{outcome_action.seq_count:04d}.jpg"
-        cv2.imwrite(save_path, save_img)
+        cv2.imwrite(save_path, display_img)
         outcome_action.seq_count += 1
-
-        return save_img
-            
-    else:
-        print("当前没有识别到任何灯，不保存图片。")
-        # 即使无检测也返回一张带提示的图，用于实时显示
-        display_img = rectify_bgr_left.copy()
-        cv2.putText(display_img, "No detection", (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 2)
-        return display_img
+    
+    # 帧率
+    cv2.putText(display_img, f"FPS: {fps:.1f}", (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    
+    return display_img
