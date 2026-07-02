@@ -98,7 +98,8 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left, fps=0.0):
     if len(boxes) >= 1:
         blue_pts = []   # BlueLight (class 0) → 红色
         green_pts = []  # GreenLight (class 1) → 紫色
-        targets_3d = []  # 有有效深度的点 → 解算相对光轴角度
+        blue_3d = []   # BlueLight 有有效深度的点
+        green_3d = []  # GreenLight 有有效深度的点
         
         for target in boxes:
             cls = int(target.cls[0])
@@ -115,7 +116,11 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left, fps=0.0):
             # 计算该点 3D 坐标 → 解算相对相机光轴的角度
             pt_3d = get_robust_depth(xyz_matrix, x1, y1, x2, y2)
             if pt_3d is not None:
-                targets_3d.append(Target_Point(cx=cx, cy=cy, pt_3d=pt_3d))
+                _tp = Target_Point(cx=cx, cy=cy, pt_3d=pt_3d)
+                if cls == 0:
+                    blue_3d.append(_tp)
+                else:
+                    green_3d.append(_tp)
                 h_ang = math.degrees(math.atan2(pt_3d[0], pt_3d[2]))
                 v_ang = math.degrees(math.atan2(-pt_3d[1], pt_3d[2]))
                 cv2.putText(display_img, f"Yaw:{h_ang:+.1f} Pitch:{v_ang:+.1f}",
@@ -141,17 +146,65 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left, fps=0.0):
             for j in range(i + 1, len(blue_pts)):
                 cv2.line(display_img, blue_pts[i], blue_pts[j], (0, 0, 0), 2)
         
-        # ===== 汇总：最近目标点相对相机光轴的角度 =====
-        if len(targets_3d) >= 1:
-            nearest = min(targets_3d, key=lambda p: numpy.linalg.norm(p.pt_3d))
-            Xn, Yn, Zn = nearest.pt_3d
-            hn = math.degrees(math.atan2(Xn, Zn))
-            vn = math.degrees(math.atan2(-Yn, Zn))
-            print(f"📐 最近点 → Yaw:{hn:+.1f} Pitch:{vn:+.1f}  X:{Xn:.0f} Y:{Yn:.0f} Z:{Zn:.0f}mm")
-            cv2.putText(display_img, f"Yaw:{hn:+.1f}  Pitch:{vn:+.1f}", (20, 70),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-            cv2.putText(display_img, f"Z:{Zn:.0f}mm  X:{Xn:.0f}  Y:{Yn:.0f}", (20, 95),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        # ===== 目标级角度解算（按检测点数量分情况） =====
+        n_total = len(blue_3d) + len(green_3d)
+        if n_total >= 1:
+            all_tp = blue_3d + green_3d
+            
+            # 几何中心（1点=自身，2点=中点，3点=三角形重心）
+            center_3d = numpy.mean([tp.pt_3d for tp in all_tp], axis=0)
+            target_yaw = math.degrees(math.atan2(center_3d[0], center_3d[2]))
+            target_pitch = math.degrees(math.atan2(-center_3d[1], center_3d[2]))
+            _dist = numpy.linalg.norm(center_3d)
+            
+            # Roll：黑线垂线方向远离绿灯，与 Y 轴正半轴（朝上）的夹角
+            target_roll = None
+            if n_total >= 3 and len(blue_3d) >= 2 and len(green_3d) >= 1:
+                _bp = sorted(blue_3d, key=lambda p: p.cx)
+                _bL, _bR = _bp[0], _bp[-1]
+                _dx = _bR.cx - _bL.cx
+                _dy = _bR.cy - _bL.cy
+                if abs(_dx) > 1 or abs(_dy) > 1:
+                    # 黑线的两个垂直方向
+                    _p1 = (_dy, -_dx)
+                    _p2 = (-_dy, _dx)
+                    # 黑线中点 → 绿灯
+                    _mx = (_bL.cx + _bR.cx) / 2.0
+                    _my = (_bL.cy + _bR.cy) / 2.0
+                    _g = green_3d[0]
+                    _tg = (_g.cx - _mx, _g.cy - _my)
+                    # 选远离绿灯的垂线（dot < 0）
+                    if _p1[0] * _tg[0] + _p1[1] * _tg[1] < 0:
+                        _aux = _p1
+                    else:
+                        _aux = _p2
+                    # 辅助线与 Y 正半轴(朝上=0,-1)的夹角
+                    target_roll = -math.degrees(math.atan2(_aux[0], -_aux[1]))
+            
+            if target_roll is not None:
+                print(f"🎯 目标 → Yaw:{target_yaw:+.1f} Pitch:{target_pitch:+.1f} Roll:{target_roll:+.1f}")
+                cv2.putText(display_img, f"Yaw:{target_yaw:+.1f}  Pitch:{target_pitch:+.1f}  Roll:{target_roll:+.1f}",
+                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            else:
+                print(f"🎯 目标 → Yaw:{target_yaw:+.1f} Pitch:{target_pitch:+.1f}")
+                cv2.putText(display_img, f"Yaw:{target_yaw:+.1f}  Pitch:{target_pitch:+.1f}",
+                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            
+            cv2.putText(display_img, f"Z:{center_3d[2]:.0f}mm  X:{center_3d[0]:.0f}  Y:{center_3d[1]:.0f}",
+                        (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            
+            # 三点：画青色三角 + 黄色顶点标记
+            if n_total >= 3 and len(blue_3d) >= 2 and len(green_3d) >= 1:
+                _sy = sorted(all_tp, key=lambda p: p.cy)
+                _bot = _sy[-1]
+                _top2 = sorted(_sy[:2], key=lambda p: p.cx)
+                _lpt, _rpt = _top2[0], _top2[1]
+                cv2.line(display_img, (_lpt.cx, _lpt.cy), (_rpt.cx, _rpt.cy), (255, 255, 0), 2)
+                cv2.line(display_img, (_lpt.cx, _lpt.cy), (_bot.cx, _bot.cy), (255, 255, 0), 2)
+                cv2.line(display_img, (_rpt.cx, _rpt.cy), (_bot.cx, _bot.cy), (255, 255, 0), 2)
+                cv2.circle(display_img, (_lpt.cx, _lpt.cy), 4, (0, 255, 255), -1)
+                cv2.circle(display_img, (_rpt.cx, _rpt.cy), 4, (0, 255, 255), -1)
+                cv2.circle(display_img, (_bot.cx, _bot.cy), 4, (0, 255, 255), -1)
         
         # 保存标注图
         save_path = f"{outcome_action.save_dir}/{outcome_action.seq_count:04d}.jpg"
