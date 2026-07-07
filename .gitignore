@@ -4,5 +4,6 @@
 *.pt
 *.png
 *.whl
+*.txt
 weights/test_ncnn_model
 __pycache__

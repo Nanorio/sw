@@ -1,0 +1,8 @@
+{
+  "kp": 1.2,
+  "ki": 0.05,
+  "kd": 0.2,
+  "quadratic_kp": 0.05,
+  "max_out": 10.0,
+  "integral_limit": 2.0
+}
