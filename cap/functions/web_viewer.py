@@ -70,7 +70,7 @@ function doCapture(){cap();cv.toBlob(function(b){if(b)dl(b,"capture_"+ts()+".jpg
 function doRecord(){
 if(rec&&rec.state==="recording"){rec.stop();rb.textContent="录像";rb.classList.remove("on");bd.classList.remove("on");if(fid){cancelAnimationFrame(fid);fid=null}return}
 cap();chunks=[];
-try{rec=new MediaRecorder(cv.captureStream(30),{mimeType:"video/webm"})}catch(e){st.textContent="浏览器不支持录像";return}
+try{if(!window.MediaRecorder)throw 0;rec=new MediaRecorder(cv.captureStream(30),{mimeType:"video/webm"})}catch(e){st.textContent="录像需 HTTPS 或现代浏览器(Chrome/Firefox)";return}
 rec.ondataavailable=function(e){if(e.data.size)chunks.push(e.data)};
 rec.onstop=function(){var b=new Blob(chunks,{type:"video/webm"});if(b.size>0)dl(b,"record_"+ts()+".webm");chunks=[]};
 rec.start(1000);rb.textContent="停止";rb.classList.add("on");bd.classList.add("on");

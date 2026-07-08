@@ -4,11 +4,11 @@
 卸载 → 重载 v4l2loopback (exclusive_caps=1)，确保虚拟设备格式协商正常。
 
 用法:
-  sudo python3 setup_v4l2.py
+  python3 setup_v4l2.py
   python3 main.py
 
-可以合在一行:
-  sudo python3 setup_v4l2.py && python3 main.py
+可以合在一行（只需输一次 sudo 密码）:
+  python3 setup_v4l2.py && python3 main.py
 """
 
 import subprocess
@@ -28,7 +28,7 @@ def main():
     ]
 
     for cmd in cmds:
-        print(f">>> sudo {' '.join(cmd)}")
+        print(f">>> [sudo] {' '.join(cmd)}")
         result = subprocess.run(
             ["sudo"] + cmd,
             capture_output=True,
