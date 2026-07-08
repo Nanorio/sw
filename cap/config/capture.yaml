@@ -1,9 +1,15 @@
-cameraId: 2
-captureMode: camera #camera或zmq
-zmqPort: 5555
+# cameraId → cap_init: 开 /dev/video2（v4l2loopback 虚拟设备）
+cameraId: 2    # cap_init → 开 /dev/video2（v4l2loopback 虚拟设备）
+captureMode: camera
+
+# v4l2loopback 设备编号
+v4l2:
+  realDeviceId: 0
+  virtualDeviceId: 2
+
 exposure:
+  mode: auto
+  manualValue: 35
   cameraRange:
   - 3
   - 2047
-  manualValue: 35
-  mode: auto  # auto或manual

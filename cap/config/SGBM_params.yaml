@@ -12,6 +12,8 @@ uniquenessRatio: 10
 speckleWindowSize: 100
 speckleRange: 10
 
+depthCorFactor: 0.71
+
 # 供以mode选择
 modeCategory:
   - STEREO_SGBM_MODE_HH4

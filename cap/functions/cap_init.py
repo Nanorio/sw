@@ -34,7 +34,6 @@ class StereoCamera:
             self.right_distortion = numpy.array(params['right']['distortion'])
             
             self.imageSize = tuple(params['imageSize'])
-            #self.Q = numpy.array(params['stereo']['Q'])
             self.Rotation = numpy.array(params['stereo']['Rotation']).T
             self.Translation = numpy.array(params['stereo']['Translation']).reshape(3, 1)
         
