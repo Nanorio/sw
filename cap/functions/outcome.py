@@ -82,6 +82,7 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left, fps=0.0):
     boxes = results[0].boxes
     
     # 保存原始图（无标注），用于训练
+    n_total = 0  # 框外初始化，后续在框内更新，框外统一清除
     if len(boxes) >= 1:
         raw_path = f"{outcome_action.save_dir}/original/{outcome_action.seq_count:04d}.jpg"
         cv2.imwrite(raw_path, rectify_bgr_left)
@@ -182,16 +183,22 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left, fps=0.0):
                     target_roll = -math.degrees(math.atan2(_aux[0], -_aux[1]))
             
             if target_roll is not None:
-                print(f"🎯 目标 → Yaw:{target_yaw:+.1f} Pitch:{target_pitch:+.1f} Roll:{target_roll:+.1f}")
+                pass  # 终端输出由 main.py 统一处理
                 cv2.putText(display_img, f"Yaw:{target_yaw:+.1f}  Pitch:{target_pitch:+.1f}  Roll:{target_roll:+.1f}",
                             (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
             else:
-                print(f"🎯 目标 → Yaw:{target_yaw:+.1f} Pitch:{target_pitch:+.1f}")
+                pass  # 终端输出由 main.py 统一处理
                 cv2.putText(display_img, f"Yaw:{target_yaw:+.1f}  Pitch:{target_pitch:+.1f}",
                             (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
             
             cv2.putText(display_img, f"Z:{center_3d[2]:.0f}mm  X:{center_3d[0]:.0f}  Y:{center_3d[1]:.0f}",
                         (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            # 暴露给 main.py 用于 3D 视图和终端输出
+            outcome_action.last_center_cam = center_3d
+            outcome_action.last_depth = float(center_3d[2])
+            outcome_action.last_yaw = target_yaw
+            outcome_action.last_pitch = target_pitch
+            outcome_action.last_roll = target_roll
             
             # 三点：画青色三角 + 黄色顶点标记
             if n_total >= 3 and len(blue_3d) >= 2 and len(green_3d) >= 1:
@@ -205,11 +212,16 @@ def outcome_action(results, xyz_matrix, rectify_bgr_left, fps=0.0):
                 cv2.circle(display_img, (_lpt.cx, _lpt.cy), 4, (0, 255, 255), -1)
                 cv2.circle(display_img, (_rpt.cx, _rpt.cy), 4, (0, 255, 255), -1)
                 cv2.circle(display_img, (_bot.cx, _bot.cy), 4, (0, 255, 255), -1)
-        
         # 保存标注图
         save_path = f"{outcome_action.save_dir}/{outcome_action.seq_count:04d}.jpg"
         cv2.imwrite(save_path, display_img)
         outcome_action.seq_count += 1
+    
+    # 无有效3D时清除历史数据（框外统一执行，覆盖 len(boxes)==0 的情况）
+    if n_total == 0:
+        for _k in ('last_center_cam', 'last_depth', 'last_yaw', 'last_pitch', 'last_roll'):
+            if _k in outcome_action.__dict__:
+                delattr(outcome_action, _k)
     
     # 帧率
     cv2.putText(display_img, f"FPS: {fps:.1f}", (20, 40),

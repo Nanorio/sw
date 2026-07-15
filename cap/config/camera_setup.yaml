@@ -1,0 +1,22 @@
+# 双目相机在机器人上的安装位置与朝向
+# 绝对坐标系：X向右，Y向上，Z向前
+# activeCameraId 指定当前使用的相机编号
+
+activeCameraId: 0
+
+cameras:
+  0:
+    name: "Front"
+    position_mm: [0, 0, 500]
+    look_dir: [0, 0, 1]
+    up_dir: [0, 1, 0]
+  1:
+    name: "Left"
+    position_mm: [-500, 0, 0]
+    look_dir: [-1, 0, 0]
+    up_dir: [0, 1, 0]
+  2:
+    name: "Right"
+    position_mm: [500, 0, 0]
+    look_dir: [1, 0, 0]
+    up_dir: [0, 1, 0]

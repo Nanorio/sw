@@ -10,6 +10,8 @@ import numpy
 from functions.cap_init import StereoCamera
 from functions.yolo_detector import YOLOV8
 from functions.outcome import outcome_action
+from functions.robot_coord import RobotCoord
+from functions.vispy_viewer import Robot3DViewer
 #<<<
 
 
@@ -49,6 +51,18 @@ def main():
     cam = StereoCamera()
     print(">>> 初始化 YOLOV8 ...")
     yolo = YOLOV8()
+    # ========== 加载机器人坐标系 ==========
+    robot = RobotCoord()
+    _cam_id = robot.active_cam_id
+
+    # ========== 启动 3D 视图 ==========
+    import yaml
+    with open("./config/camera_params.yaml", "r", encoding="utf-8") as _fh:
+        _cal = yaml.safe_load(_fh)
+    _fx = _cal["left"]["matrix"][0][0]
+    _fy = _cal["left"]["matrix"][1][1]
+    viewer = Robot3DViewer(robot, _fx, _fy)
+
     print("\n\n————————————————————\n开始检测\n————————————————————")
 
     # ========== 4. 主循环 ==========
@@ -86,10 +100,39 @@ def main():
 
                 display_img = outcome_action(yolo.results, cam.xyz, cam.rectify_bgr_left, current_fps)
                 cv2.imshow(win_name, display_img)
+
+                # ===== 3D 视图 + 终端输出 =====
+                if hasattr(outcome_action, 'last_center_cam'):
+                    _cam_pt = outcome_action.last_center_cam
+                    _abs_pt = robot.camera_to_abs(_cam_id, _cam_pt)
+                    # 独立保护 3D 更新，不影响主线程
+                    try:
+                        viewer.update_target(_abs_pt)
+                    except Exception as _e3d:
+                        print(f"3D更新异常: {_e3d}")
+                    _y = outcome_action.last_yaw
+                    _p = outcome_action.last_pitch
+                    _r = outcome_action.last_roll
+                    _loc = f"{_abs_pt[0]:.0f},{_abs_pt[1]:.0f},{_abs_pt[2]:.0f}"
+                    if _r is not None:
+                        print(f"[Cam {_cam_id}]目标 → Yaw:{_y:+.1f} Pitch:{_p:+.1f} Roll:{_r:+.1f} Depth:{_cam_pt[2]:.0f}mm Location:{_loc}")
+                    else:
+                        print(f"[Cam {_cam_id}]目标 → Yaw:{_y:+.1f} Pitch:{_p:+.1f} Depth:{_cam_pt[2]:.0f}mm Location:{_loc}")
+                else:
+                    try:
+                        viewer.update_target(None)
+                    except Exception as _e3d:
+                        print(f"3D更新异常: {_e3d}")
+                try:
+                    Robot3DViewer.process_events()
+                except Exception as _e3d:
+                    print(f"3D事件异常: {_e3d}")
+
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     print("用户按下 q，退出检测"); break
             except Exception as e:
-                print(f"处理这一帧时发生异常: {e}"); continue
+                import traceback
+                print(f"处理这一帧时发生异常: {e}\n{traceback.format_exc()}"); continue
     except KeyboardInterrupt:
         print("\n收到 Ctrl+C，退出检测")
     finally:
