@@ -20,3 +20,9 @@ cameras:
     position_mm: [500, 0, 0]
     look_dir: [1, 0, 0]
     up_dir: [0, 1, 0]
+
+# 3D 视图范围（可自定义，单位 mm）
+view3d:
+  xlim: [-10000, 10000]
+  ylim: [-5000, 12000]
+  zlim: [-5000, 10000]

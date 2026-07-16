@@ -8,6 +8,8 @@ matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy
+import yaml
+from pathlib import Path
 from .robot_coord import RobotCoord
 
 
@@ -71,7 +73,7 @@ class Robot3DViewer:
             ax.plot([0, p[0]], [0, p[2]], [0, p[1]],
                     color=col, alpha=0.35, linewidth=1, linestyle="--")
             # 相机点 (交换 Y↔Z)
-            ax.scatter([p[0]], [p[2]], [p[1]], c=col, s=300, marker="o",
+            ax.scatter([p[0]], [p[2]], [p[1]], c=col, s=100, marker="o",
                        alpha=0.95, edgecolors="white", linewidths=2,
                        label=f"Cam{cid_s}" if is_act else None)
             # 标签（相机上方 600mm, 这里"上方"=Z+在 mpl 中）
@@ -104,6 +106,15 @@ class Robot3DViewer:
         # 目标
         self._target = ax.scatter([],[],[], c="red", s=250, marker="o",
                                   alpha=0.9, edgecolors="yellow", linewidths=2)
+        # 目标坐标文字
+        self._target_label = ax.text(0, 0, 0, "", color="red", fontsize=10,
+                                     fontweight="bold", ha="left")
+
+        # 窗口启动时最小化，不抢前台
+        try:
+            self.fig.canvas.manager.window.iconify()
+        except Exception:
+            pass
 
     def update_target(self, pos_abs_mm: numpy.ndarray):
         self._target_pos = pos_abs_mm
@@ -114,9 +125,16 @@ class Robot3DViewer:
                                         numpy.array([pos_abs_mm[2]]),
                                         numpy.array([pos_abs_mm[1]]))
             self._target.set_alpha(0.9)
+            # 坐标文字跟在点旁边（mpl 坐标）
+            self._target_label.set_text(f"({pos_abs_mm[0]:.0f},{pos_abs_mm[1]:.0f},{pos_abs_mm[2]:.0f})")
+            self._target_label.set_position((pos_abs_mm[0], pos_abs_mm[2]))
+            self._target_label.set_3d_properties(pos_abs_mm[1], zdir="z")
+            self._target_label.set_alpha(0.9)
         else:
             self._target._offsets3d = (numpy.array([]), numpy.array([]), numpy.array([]))
             self._target.set_alpha(0)
+            self._target_label.set_text("")
+            self._target_label.set_alpha(0)
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
 
