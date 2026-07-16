@@ -37,9 +37,20 @@ class Robot3DViewer:
         self.ax.set_title("Robot 3D View", color="white", fontsize=14)
 
         self.ax.view_init(elev=25, azim=-45)
-        self.ax.set_xlim(-8000, 8000)
-        self.ax.set_ylim(-4000, 10000)
-        self.ax.set_zlim(-4000, 8000)
+        # 从 camera_setup.yaml 读取 view3d 范围
+        _v3d_cfg = Path("./config/camera_setup.yaml")
+        _v3d_xlim = [-8000, 8000]; _v3d_ylim = [-4000, 10000]; _v3d_zlim = [-4000, 8000]
+        try:
+            with open(_v3d_cfg, "r", encoding="utf-8") as _f:
+                _v3d = yaml.safe_load(_f).get("view3d", {})
+            if "xlim" in _v3d: _v3d_xlim = _v3d["xlim"]
+            if "ylim" in _v3d: _v3d_ylim = _v3d["ylim"]
+            if "zlim" in _v3d: _v3d_zlim = _v3d["zlim"]
+        except Exception:
+            pass
+        self.ax.set_xlim(*_v3d_xlim)
+        self.ax.set_ylim(*_v3d_ylim)
+        self.ax.set_zlim(*_v3d_zlim)
 
         self._draw_static()
 
@@ -85,11 +96,11 @@ class Robot3DViewer:
             apex, base = rc.get_frustum_verts(
                 rc.active_cam_id, self._fx, self._fy, self._img_w, self._img_h, self._max_dist_mm)
             for i in range(4):
-                ax.plot([apex[0],base[i,0]],[apex[1],base[i,1]],[apex[2],base[i,2]],
+                ax.plot([apex[0],base[i,0]],[apex[2],base[i,2]],[apex[1],base[i,1]],
                         color="cyan", alpha=0.25, linewidth=1)
             for i in range(4):
                 j = (i+1)%4
-                ax.plot([base[i,0],base[j,0]],[base[i,1],base[j,1]],[base[i,2],base[j,2]],
+                ax.plot([base[i,0],base[j,0]],[base[i,2],base[j,2]],[base[i,1],base[j,1]],
                         color="cyan", alpha=0.25, linewidth=1)
         except Exception:
             pass
