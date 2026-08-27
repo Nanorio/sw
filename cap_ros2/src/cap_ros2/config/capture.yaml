@@ -1,0 +1,18 @@
+# ROS2 camera_node opens the real stereo device by default.
+# Set camera_id:=0 to open /dev/video0 directly.
+captureMode: camera
+cameraId: 2
+fps: 30
+
+v4l2:
+  realDeviceId: 0
+  virtualDeviceId: 2
+
+exposure:
+  mode: auto
+  manualValue: 35
+  cameraRange: [3, 2047]
+
+# Static/video modes (optional)
+imagePath: ./staticSource/image/test.jpg
+videoPath: ./staticSource/video/test.mp4

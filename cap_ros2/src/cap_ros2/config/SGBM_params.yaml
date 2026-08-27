@@ -1,0 +1,20 @@
+imgChannels: 3
+blockSize: 5
+minDisparity: 0
+numDisparities: 96
+P1_factor: 8
+P2_factor: 64
+disp12MaxDiff: 1
+preFilterCap: 63
+uniquenessRatio: 10
+speckleWindowSize: 100
+speckleRange: 10
+
+depthCorFactor: 0.71
+
+modeCategory:
+  - STEREO_SGBM_MODE_HH4
+  - STEREO_SGBM_MODE_SGBM
+  - STEREO_SGBM_MODE_HH
+
+mode: STEREO_SGBM_MODE_SGBM

@@ -1,0 +1,23 @@
+activeCameraId: 0
+
+cameras:
+  0:
+    name: "Front"
+    position_mm: [0, 0, 500]
+    look_dir: [0, 0, 1]
+    up_dir: [0, 1, 0]
+  1:
+    name: "Left"
+    position_mm: [-500, 0, 0]
+    look_dir: [-1, 0, 0]
+    up_dir: [0, 1, 0]
+  2:
+    name: "Right"
+    position_mm: [500, 0, 0]
+    look_dir: [1, 0, 0]
+    up_dir: [0, 1, 0]
+
+view3d:
+  xlim: [-5000, 5000]
+  ylim: [-3000, 3000]
+  zlim: [-100, 5000]
