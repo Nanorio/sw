@@ -58,6 +58,9 @@ class PoseNode(Node):
 
         self.calib = load_yaml(config_dir / "camera_params.yaml")
         self.rectify = build_rectify_maps(self.calib)
+        p1 = self.rectify["P1"]
+        self.cam_fx = float(p1[0, 0]) if p1 is not None else 1.0
+        self.cam_fy = float(p1[1, 1]) if p1 is not None else 1.0
         self.Q = self.rectify["Q"]
         self.depth_cor_factor = float(
             load_yaml(config_dir / "SGBM_params.yaml").get("depthCorFactor", 1.0)
@@ -71,6 +74,7 @@ class PoseNode(Node):
         self._detections = {}
         self._disparities = {}
         self._rois = {}
+        self._last_roi = None
         self._xyz = None
         self._last_detected = False
         self._last_details = None
@@ -125,6 +129,11 @@ class PoseNode(Node):
         if not self.enabled:
             return
         key = self._stamp_key(msg.header.stamp)
+        if not msg.detections:
+            self._disparities.pop(key, None)
+            self._rois.pop(key, None)
+            self._publish_empty(msg.header.stamp)
+            return
         self._detections[key] = msg
         self._prune()
         disparity = self._disparities.pop(key, None)
@@ -133,18 +142,9 @@ class PoseNode(Node):
             self._solve(msg, disparity, self._rois.pop(key, None))
 
     def _on_roi(self, msg):
-        key = self._stamp_key(msg.header.stamp) if hasattr(msg, "header") else None
-        if key is None:
-            return
         if len(msg.data) < 6:
             return
-        self._rois[key] = list(msg.data)
-        self._prune()
-        disparity = self._disparities.pop(key, None)
-        detections = self._detections.pop(key, None)
-        roi = self._rois.pop(key, None)
-        if disparity is not None and detections is not None:
-            self._solve(detections, disparity, roi)
+        self._last_roi = list(msg.data)
 
     def _on_disparity(self, msg):
         if not self.enabled:
@@ -176,6 +176,8 @@ class PoseNode(Node):
         green_3d = []
         other_3d = []
         roi_x, roi_y = 0, 0
+        if roi is None:
+            roi = self._last_roi
         if roi and len(roi) >= 4:
             roi_x = int(roi[0])
             roi_y = int(roi[1])
@@ -204,6 +206,10 @@ class PoseNode(Node):
                 x2,
                 y2,
                 self.depth_cor_factor,
+                roi_x,
+                roi_y,
+                self.cam_fx,
+                self.cam_fy,
             )
             if pt_3d is None:
                 continue

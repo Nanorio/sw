@@ -182,6 +182,10 @@ def robust_depth_from_xyz(
     x2: int,
     y2: int,
     depth_cor_factor: float = 1.0,
+    roi_x: float = 0.0,
+    roi_y: float = 0.0,
+    fx: float = 1.0,
+    fy: float = 1.0,
 ):
     x1, y1 = max(0, int(x1)), max(0, int(y1))
     x2, y2 = max(x1 + 1, int(x2)), max(y1 + 1, int(y2))
@@ -202,11 +206,16 @@ def robust_depth_from_xyz(
     if len(valid_pts) < 5:
         return None
 
+    median_x = float(np.median(valid_pts[:, 0]))
+    median_y = float(np.median(valid_pts[:, 1]))
+    median_z = float(np.median(valid_pts[:, 2])) * depth_cor_factor
+    fx = fx if fx and fx > 0 else 1.0
+    fy = fy if fy and fy > 0 else 1.0
     return np.array(
         [
-            float(np.median(valid_pts[:, 0])),
-            float(np.median(valid_pts[:, 1])),
-            float(np.median(valid_pts[:, 2])) * depth_cor_factor,
+            median_x + roi_x * median_z / fx,
+            median_y + roi_y * median_z / fy,
+            median_z,
         ],
         dtype=float,
     )
