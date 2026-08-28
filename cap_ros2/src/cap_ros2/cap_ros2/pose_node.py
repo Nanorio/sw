@@ -52,6 +52,8 @@ class PoseNode(Node):
         )
         self.enabled = bool(self.get_parameter("enabled").value)
         self.declare_parameter("filter_alpha", 0.35)
+        self.declare_parameter("y_pixel_offset", 150)
+        self.y_pixel_offset = int(self.get_parameter("y_pixel_offset").value)
         self.filter_alpha = float(self.get_parameter("filter_alpha").value)
         self._filtered = None
         self._filtered_timestamp = None
@@ -62,6 +64,7 @@ class PoseNode(Node):
         self.cam_fx = float(p1[0, 0]) if p1 is not None else 1.0
         self.cam_fy = float(p1[1, 1]) if p1 is not None else 1.0
         self.Q = self.rectify["Q"]
+        self.image_h = int(self.rectify["image_size"][1])
         self.depth_cor_factor = float(
             load_yaml(config_dir / "SGBM_params.yaml").get("depthCorFactor", 1.0)
         )
@@ -163,10 +166,49 @@ class PoseNode(Node):
             self._disparities.pop(key, None)
             self._solve(detections, disparity, roi)
 
+    def _detection_y0(self, det_msg):
+        if not det_msg.detections:
+            return None
+        h = self.image_h
+        bands = []
+        for det in det_msg.detections:
+            cy = float(det.bbox.center.position.y)
+            sy = max(20.0, float(det.bbox.size_y))
+            y0 = int(max(0, cy - sy / 2.0))
+            y1 = int(min(h, cy + sy / 2.0))
+            if y1 - y0 >= 4:
+                bands.append((y0, y1))
+        if not bands:
+            return None
+        margin = 40
+        minsize = 64
+        y0 = max(0, min(b[0] for b in bands) - margin)
+        y1 = min(h, max(b[1] for b in bands) + margin)
+        if y1 - y0 < minsize:
+            mid = (y0 + y1) // 2
+            y0 = max(0, mid - minsize // 2)
+            y1 = min(h, y0 + minsize)
+        return y0
+
     def _solve(self, det_msg, disparity, roi=None):
+        roi_x, roi_y = 0, 0
+        if roi is None:
+            roi = self._last_roi
+        if roi and len(roi) >= 6:
+            roi_x = int(roi[0])
+            roi_y = int(roi[1])
+            rw = int(roi[2])
+            rh = int(roi[3])
+            src_w = int(roi[4])
+            src_h = int(roi[5])
         try:
+            q_band = self.Q.copy()
+            if roi_x and q_band[0, 0] != 0:
+                q_band[0, 3] += roi_x * q_band[0, 0]
+            if roi_y and q_band[1, 1] != 0:
+                q_band[1, 3] += roi_y * q_band[1, 1]
             self._xyz = cv2.reprojectImageTo3D(
-                disparity, self.Q, handleMissingValues=True
+                disparity, q_band, handleMissingValues=True
             )
         except Exception as exc:
             self.get_logger().error(f"reprojectImageTo3D failed: {exc}")
@@ -175,12 +217,6 @@ class PoseNode(Node):
         blue_3d = []
         green_3d = []
         other_3d = []
-        roi_x, roi_y = 0, 0
-        if roi is None:
-            roi = self._last_roi
-        if roi and len(roi) >= 4:
-            roi_x = int(roi[0])
-            roi_y = int(roi[1])
         height, width = disparity.shape[:2]
         for det in det_msg.detections:
             if not det.results:
@@ -190,8 +226,10 @@ class PoseNode(Node):
             except (TypeError, ValueError):
                 class_id = -1
 
-            center_x = float(det.bbox.center.position.x) - roi_x
-            center_y = float(det.bbox.center.position.y) - roi_y
+            full_cx = float(det.bbox.center.position.x)
+            full_cy = float(det.bbox.center.position.y)
+            center_x = full_cx - roi_x
+            center_y = full_cy - roi_y
             box_w = float(det.bbox.size_x)
             box_h = float(det.bbox.size_y)
             x1 = int(max(0, min(width - 1, center_x - box_w / 2.0)))
@@ -206,16 +244,12 @@ class PoseNode(Node):
                 x2,
                 y2,
                 self.depth_cor_factor,
-                roi_x,
-                roi_y,
-                self.cam_fx,
-                self.cam_fy,
             )
             if pt_3d is None:
                 continue
             point = _TargetPoint(
-                cx=center_x,
-                cy=center_y,
+                cx=full_cx,
+                cy=full_cy,
                 class_id=class_id,
                 pt_3d=pt_3d,
             )
