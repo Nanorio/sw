@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import cv2
+import numpy as np
 import rclpy
 from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Float64MultiArray
+from vision_msgs.msg import Detection2DArray
 
 from .common import decode_compressed
 
@@ -20,6 +22,8 @@ class DisplayNode(Node):
         self.declare_parameter("use_window", True)
         self.use_window = bool(self.get_parameter("use_window").value)
         self._annotated = None
+        self._left = None
+        self._detections = None
         self._depth = None
         self._stereo = None
         self._pose_stamped = None
@@ -31,8 +35,11 @@ class DisplayNode(Node):
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
         )
-        self.annotated_sub = self.create_subscription(
-            CompressedImage, "/cap/yolo/annotated_image", self._on_annotated, sensor_qos
+        self.left_sub = self.create_subscription(
+            CompressedImage, "/cap/camera/left", self._on_left, sensor_qos
+        )
+        self.det_sub = self.create_subscription(
+            Detection2DArray, "/cap/yolo/detections", self._on_detections, 10
         )
         self.depth_sub = self.create_subscription(
             CompressedImage,
@@ -58,11 +65,14 @@ class DisplayNode(Node):
         self.timer = self.create_timer(1.0 / 30.0, self.render)
         self.get_logger().info(f"display_node ready, use_window={self.use_window}")
 
-    def _on_annotated(self, msg):
+    def _on_left(self, msg):
         try:
-            self._annotated = decode_compressed(msg)
+            self._left = decode_compressed(msg)
         except Exception as exc:
-            self.get_logger().error(f"Annotated decode failed: {exc}")
+            self.get_logger().error(f"Left image decode failed: {exc}")
+
+    def _on_detections(self, msg):
+        self._detections = msg
 
     def _on_depth(self, msg):
         try:
@@ -87,12 +97,8 @@ class DisplayNode(Node):
             self._log_pose_headless()
             return
         try:
-            if self._annotated is not None:
-                frame = self._annotated.copy()
-                if self._pose_details is not None and self._is_detected(
-                    self._pose_details
-                ):
-                    self._overlay_pose(frame, self._pose_details)
+            frame = self._build_main_frame()
+            if frame is not None:
                 cv2.imshow("CAP Detection", frame)
             if self._depth is not None:
                 cv2.imshow("CAP SGBM Depth", self._depth)
@@ -111,13 +117,14 @@ class DisplayNode(Node):
         if len(data) < 11:
             return
         lines = [
-            f"XYZ: {data[0]:.0f} {data[1]:.0f} {data[2]:.0f} mm",
-            f"Yaw: {data[6]:+.1f}  Pitch: {data[7]:+.1f}",
+            f"Yaw:{data[6]:+.1f}  Pitch:{data[7]:+.1f}",
+            f"Z:{data[5]:.0f}mm  X:{data[3]:.0f}  Y:{data[4]:.0f}",
         ]
         if data[9] > 0.0:
-            lines.append(f"Roll: {data[8]:+.1f}")
+            lines.append(f"Roll:{data[8]:+.1f}")
+        lines.append(f"ROBOT XYZ:{data[0]:.0f} {data[1]:.0f} {data[2]:.0f} mm")
         for idx, line in enumerate(lines):
-            y = 40 + idx * 30
+            y = 70 + idx * 26
             cv2.putText(
                 frame,
                 line,
@@ -127,6 +134,80 @@ class DisplayNode(Node):
                 (0, 255, 255),
                 2,
             )
+
+    def _build_main_frame(self):
+        if self._left is None and self._annotated is not None:
+            frame = self._annotated.copy()
+        elif self._left is not None:
+            frame = self._left.copy()
+        else:
+            frame = None
+        if frame is not None and self._detections is not None:
+            self._draw_detections(frame, self._detections)
+        if frame is not None and self._pose_details is not None and self._is_detected(
+            self._pose_details
+        ):
+            self._overlay_pose(frame, self._pose_details)
+        return frame
+
+    def _draw_detections(self, frame, det_msg):
+        h_i, w_i = frame.shape[:2]
+        cx_i, cy_i = 331, 234
+        cv2.line(frame, (cx_i, 0), (cx_i, h_i - 1), (0, 255, 0), 1)
+        cv2.line(frame, (0, cy_i), (w_i - 1, cy_i), (0, 255, 0), 1)
+        cv2.circle(frame, (cx_i, cy_i), 5, (0, 255, 0), 2)
+
+        blue_pts = []
+        green_pts = []
+        for det in det_msg.detections:
+            cx = float(det.bbox.center.position.x)
+            cy = float(det.bbox.center.position.y)
+            center = (int(cx), int(cy))
+            class_id = -1
+            if det.results:
+                try:
+                    class_id = int(det.results[0].hypothesis.class_id)
+                except (TypeError, ValueError):
+                    pass
+            if class_id == 0:
+                blue_pts.append(center)
+            else:
+                green_pts.append(center)
+            x1 = int(det.bbox.center.position.x - det.bbox.size_x / 2.0)
+            y1 = int(det.bbox.center.position.y - det.bbox.size_y / 2.0)
+            x2 = int(det.bbox.center.position.x + det.bbox.size_x / 2.0)
+            y2 = int(det.bbox.center.position.y + det.bbox.size_y / 2.0)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
+
+        for pt in blue_pts:
+            cv2.circle(frame, pt, 6, (0, 0, 255), -1)
+            cv2.putText(frame, "BlueLight", (pt[0] + 10, pt[1]),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+        for pt in green_pts:
+            cv2.circle(frame, pt, 6, (255, 0, 255), -1)
+            cv2.putText(frame, "GreenLight", (pt[0] + 10, pt[1]),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+
+        for g_pt in green_pts:
+            for b_pt in blue_pts:
+                cv2.line(frame, g_pt, b_pt, (255, 255, 255), 2)
+
+        for i in range(len(blue_pts)):
+            for j in range(i + 1, len(blue_pts)):
+                cv2.line(frame, blue_pts[i], blue_pts[j], (0, 0, 0), 2)
+
+        all_pts = blue_pts + green_pts
+        if len(all_pts) >= 3 and len(blue_pts) >= 2 and len(green_pts) >= 1:
+            sy = sorted(all_pts, key=lambda p: p[1])
+            bot = sy[-1]
+            top2 = sorted(sy[:2], key=lambda p: p[0])
+            lpt, rpt = top2[0], top2[1]
+            cv2.line(frame, lpt, rpt, (255, 255, 0), 2)
+            cv2.line(frame, lpt, bot, (255, 255, 0), 2)
+            cv2.line(frame, rpt, bot, (255, 255, 0), 2)
+            cv2.circle(frame, lpt, 4, (0, 255, 255), -1)
+            cv2.circle(frame, rpt, 4, (0, 255, 255), -1)
+            cv2.circle(frame, bot, 4, (0, 255, 255), -1)
 
     def _log_pose_headless(self):
         self._log_counter += 1

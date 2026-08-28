@@ -16,6 +16,7 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float64MultiArray, MultiArrayDimension
 from std_srvs.srv import Trigger
+from visualization_msgs.msg import Marker, MarkerArray
 from vision_msgs.msg import Detection2DArray
 
 from .common import (
@@ -69,6 +70,8 @@ class PoseNode(Node):
         self._last_detected = False
         self._last_details = None
         self._pose_counter = 0
+        self._trajectory = []
+        self._max_trajectory_pts = int(self.declare_parameter("max_trajectory_pts", 200).value)
         self._pair_timeout_ns = int(0.6 * 1e9)
 
         sensor_qos = QoSProfile(
@@ -90,6 +93,9 @@ class PoseNode(Node):
         )
         self.pose_srv = self.create_service(
             Trigger, "/cap/pose/get_target_pose", self._on_get_pose
+        )
+        self.marker_pub = self.create_publisher(
+            MarkerArray, "/cap/pose/markers", 10
         )
         self.get_logger().info(
             f"pose_node ready, active camera {self.active_cam_id}"
@@ -262,6 +268,14 @@ class PoseNode(Node):
         self._last_details = details
         self.pose_pub.publish(pose)
         self.details_pub.publish(details)
+        self._trajectory.append([
+            float(abs_pt[0]) / 1000.0,
+            float(abs_pt[1]) / 1000.0,
+            float(abs_pt[2]) / 1000.0,
+        ])
+        if len(self._trajectory) > self._max_trajectory_pts:
+            self._trajectory = self._trajectory[-self._max_trajectory_pts:]
+        self.marker_pub.publish(self._build_markers(header.stamp))
 
     @staticmethod
     def _euler_to_quaternion(yaw, pitch, roll):
@@ -316,6 +330,53 @@ class PoseNode(Node):
         self._last_details = details
         self.pose_pub.publish(pose)
         self.details_pub.publish(details)
+
+    def _build_markers(self, stamp):
+        markers = MarkerArray()
+        if self._trajectory:
+            line = Marker()
+            line.header.stamp = stamp
+            line.header.frame_id = "map"
+            line.ns = "target_path"
+            line.id = 0
+            line.type = Marker.LINE_STRIP
+            line.action = Marker.ADD
+            line.pose.orientation.w = 1.0
+            line.scale.x = 0.02
+            line.color.a = 1.0
+            line.color.r = 1.0
+            line.color.g = 0.7
+            line.color.b = 0.0
+            for pt in self._trajectory:
+                from geometry_msgs.msg import Point
+                p = Point()
+                p.x = float(pt[0])
+                p.y = float(pt[1])
+                p.z = float(pt[2])
+                line.points.append(p)
+            markers.markers.append(line)
+
+            sphere = Marker()
+            sphere.header.stamp = stamp
+            sphere.header.frame_id = "map"
+            sphere.ns = "target"
+            sphere.id = 1
+            sphere.type = Marker.SPHERE
+            sphere.action = Marker.ADD
+            last = self._trajectory[-1]
+            sphere.pose.position.x = float(last[0])
+            sphere.pose.position.y = float(last[1])
+            sphere.pose.position.z = float(last[2])
+            sphere.pose.orientation.w = 1.0
+            sphere.scale.x = 0.08
+            sphere.scale.y = 0.08
+            sphere.scale.z = 0.08
+            sphere.color.a = 1.0
+            sphere.color.r = 1.0
+            sphere.color.g = 0.0
+            sphere.color.b = 0.0
+            markers.markers.append(sphere)
+        return markers
 
     def _on_get_pose(self, request, response):
         if not self._last_detected or self._last_details is None:
