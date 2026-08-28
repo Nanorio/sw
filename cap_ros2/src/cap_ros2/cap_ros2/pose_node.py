@@ -14,7 +14,7 @@ from geometry_msgs.msg import PoseStamped
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
-from std_msgs.msg import Float64MultiArray, MultiArrayDimension
+from std_msgs.msg import Float64MultiArray, Int32MultiArray, MultiArrayDimension
 from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
 from vision_msgs.msg import Detection2DArray
@@ -51,6 +51,10 @@ class PoseNode(Node):
             self.get_parameter("project_root").value
         )
         self.enabled = bool(self.get_parameter("enabled").value)
+        self.declare_parameter("filter_alpha", 0.35)
+        self.filter_alpha = float(self.get_parameter("filter_alpha").value)
+        self._filtered = None
+        self._filtered_timestamp = None
 
         self.calib = load_yaml(config_dir / "camera_params.yaml")
         self.rectify = build_rectify_maps(self.calib)
@@ -66,6 +70,7 @@ class PoseNode(Node):
 
         self._detections = {}
         self._disparities = {}
+        self._rois = {}
         self._xyz = None
         self._last_detected = False
         self._last_details = None
@@ -84,6 +89,9 @@ class PoseNode(Node):
         )
         self.disp_sub = self.create_subscription(
             Image, "/cap/sgbm/disparity", self._on_disparity, sensor_qos
+        )
+        self.roi_sub = self.create_subscription(
+            Int32MultiArray, "/cap/sgbm/disparity_roi", self._on_roi, 10
         )
         self.pose_pub = self.create_publisher(
             PoseStamped, "/cap/pose/target_pose", 10
@@ -107,7 +115,7 @@ class PoseNode(Node):
 
     def _prune(self):
         now_ns = self.get_clock().now().nanoseconds
-        for store in (self._detections, self._disparities):
+        for store in (self._detections, self._disparities, self._rois):
             for key in list(store):
                 stamp_ns = key[0] * 1_000_000_000 + key[1]
                 if now_ns - stamp_ns > self._pair_timeout_ns:
@@ -122,7 +130,21 @@ class PoseNode(Node):
         disparity = self._disparities.pop(key, None)
         if disparity is not None:
             self._detections.pop(key, None)
-            self._solve(msg, disparity)
+            self._solve(msg, disparity, self._rois.pop(key, None))
+
+    def _on_roi(self, msg):
+        key = self._stamp_key(msg.header.stamp) if hasattr(msg, "header") else None
+        if key is None:
+            return
+        if len(msg.data) < 6:
+            return
+        self._rois[key] = list(msg.data)
+        self._prune()
+        disparity = self._disparities.pop(key, None)
+        detections = self._detections.pop(key, None)
+        roi = self._rois.pop(key, None)
+        if disparity is not None and detections is not None:
+            self._solve(detections, disparity, roi)
 
     def _on_disparity(self, msg):
         if not self.enabled:
@@ -136,11 +158,12 @@ class PoseNode(Node):
         self._disparities[key] = disparity
         self._prune()
         detections = self._detections.pop(key, None)
+        roi = self._rois.pop(key, None)
         if detections is not None:
             self._disparities.pop(key, None)
-            self._solve(detections, disparity)
+            self._solve(detections, disparity, roi)
 
-    def _solve(self, det_msg, disparity):
+    def _solve(self, det_msg, disparity, roi=None):
         try:
             self._xyz = cv2.reprojectImageTo3D(
                 disparity, self.Q, handleMissingValues=True
@@ -152,6 +175,10 @@ class PoseNode(Node):
         blue_3d = []
         green_3d = []
         other_3d = []
+        roi_x, roi_y = 0, 0
+        if roi and len(roi) >= 4:
+            roi_x = int(roi[0])
+            roi_y = int(roi[1])
         height, width = disparity.shape[:2]
         for det in det_msg.detections:
             if not det.results:
@@ -161,8 +188,8 @@ class PoseNode(Node):
             except (TypeError, ValueError):
                 class_id = -1
 
-            center_x = float(det.bbox.center.position.x)
-            center_y = float(det.bbox.center.position.y)
+            center_x = float(det.bbox.center.position.x) - roi_x
+            center_y = float(det.bbox.center.position.y) - roi_y
             box_w = float(det.bbox.size_x)
             box_h = float(det.bbox.size_y)
             x1 = int(max(0, min(width - 1, center_x - box_w / 2.0)))
@@ -233,15 +260,39 @@ class PoseNode(Node):
         detection_count,
     ):
         roll_value = roll if roll is not None else 0.0
+        raw = [
+            float(abs_pt[0]),
+            float(abs_pt[1]),
+            float(abs_pt[2]),
+            float(center[0]),
+            float(center[1]),
+            float(center[2]),
+            float(yaw),
+            float(pitch),
+            float(roll_value),
+        ]
+        if self._filtered is None:
+            self._filtered = list(raw)
+        else:
+            alpha = self.filter_alpha
+            self._filtered = [
+                alpha * new + (1.0 - alpha) * old
+                for new, old in zip(raw, self._filtered)
+            ]
+        abs_pt_f = np.array(self._filtered[:3])
+        center_f = np.array(self._filtered[3:6])
+        yaw_f = self._filtered[6]
+        pitch_f = self._filtered[7]
+        roll_f = self._filtered[8]
         self._last_detected = True
 
         pose = PoseStamped()
         pose.header = header
         pose.header.frame_id = f"cap_camera_{self.active_cam_id}"
-        pose.pose.position.x = float(abs_pt[0]) / 1000.0
-        pose.pose.position.y = float(abs_pt[1]) / 1000.0
-        pose.pose.position.z = float(abs_pt[2]) / 1000.0
-        qx, qy, qz, qw = self._euler_to_quaternion(yaw, pitch, roll_value)
+        pose.pose.position.x = float(abs_pt_f[0]) / 1000.0
+        pose.pose.position.y = float(abs_pt_f[1]) / 1000.0
+        pose.pose.position.z = float(abs_pt_f[2]) / 1000.0
+        qx, qy, qz, qw = self._euler_to_quaternion(yaw_f, pitch_f, roll_f)
         pose.pose.orientation.x = qx
         pose.pose.orientation.y = qy
         pose.pose.orientation.z = qz
@@ -253,15 +304,15 @@ class PoseNode(Node):
         details.layout.dim[0].size = 11
         details.layout.dim[0].stride = 11
         details.data = [
-            float(abs_pt[0]),
-            float(abs_pt[1]),
-            float(abs_pt[2]),
-            float(center[0]),
-            float(center[1]),
-            float(center[2]),
-            float(yaw),
-            float(pitch),
-            float(roll_value),
+            float(abs_pt_f[0]),
+            float(abs_pt_f[1]),
+            float(abs_pt_f[2]),
+            float(center_f[0]),
+            float(center_f[1]),
+            float(center_f[2]),
+            float(yaw_f),
+            float(pitch_f),
+            float(roll_f),
             float(detection_count),
             1.0,
         ]
@@ -269,9 +320,9 @@ class PoseNode(Node):
         self.pose_pub.publish(pose)
         self.details_pub.publish(details)
         self._trajectory.append([
-            float(abs_pt[0]) / 1000.0,
-            float(abs_pt[1]) / 1000.0,
-            float(abs_pt[2]) / 1000.0,
+            float(abs_pt_f[0]) / 1000.0,
+            float(abs_pt_f[1]) / 1000.0,
+            float(abs_pt_f[2]) / 1000.0,
         ])
         if len(self._trajectory) > self._max_trajectory_pts:
             self._trajectory = self._trajectory[-self._max_trajectory_pts:]
@@ -315,6 +366,8 @@ class PoseNode(Node):
 
     def _publish_empty(self, stamp):
         self._last_detected = False
+        self._filtered = None
+        self._filtered_timestamp = None
 
         pose = PoseStamped()
         pose.header.stamp = stamp
