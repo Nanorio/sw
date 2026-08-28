@@ -121,18 +121,19 @@ class SgbmNode(Node):
             gray_left = cv2.cvtColor(left_bgr, cv2.COLOR_BGR2GRAY)
             gray_right = cv2.cvtColor(right_bgr, cv2.COLOR_BGR2GRAY)
 
-            boxes = self._latest_boxes(gray_left.shape)
-            if not boxes:
+            bands = self._latest_y_bands(gray_left.shape)
+            if not bands:
                 return
 
-            x0, y0, x1, y1 = self._union_box(boxes, gray_left.shape)
-            rw = x1 - x0
+            y0, y1 = self._union_band(bands, gray_left.shape)
+            if y1 - y0 <= 0:
+                return
+
+            x0 = 0
+            rw = gray_left.shape[1]
             rh = y1 - y0
-            if rw <= 0 or rh <= 0:
-                return
-
-            gray_needed_left = gray_left[y0:y1, x0:x1]
-            gray_needed_right = gray_right[y0:y1, x0:x1]
+            gray_needed_left = gray_left[y0:y1, :]
+            gray_needed_right = gray_right[y0:y1, :]
             disp_raw = self.stereo.compute(gray_needed_left, gray_needed_right)
             disp_f32 = disp_raw.astype(np.float32) / 16.0
 
@@ -175,34 +176,27 @@ class SgbmNode(Node):
             return None
         return (x0, y0, x1, y1)
 
-    def _latest_boxes(self, shape):
+    def _latest_y_bands(self, shape):
         w = shape[1]
         h = shape[0]
         out = []
         for det in self._detections.detections:
             b = self._box_in_image(det.bbox, w, h)
             if b is not None:
-                out.append(b)
+                out.append((b[1], b[3]))
         return out
 
-    def _union_box(self, boxes, shape):
-        w = shape[1]
+    def _union_band(self, bands, shape):
         h = shape[0]
         margin = self.roi_margin
         minsize = self.min_roi_size
-        x0 = max(0, min(b[0] for b in boxes) - margin)
-        y0 = max(0, min(b[1] for b in boxes) - margin)
-        x1 = min(w, max(b[2] for b in boxes) + margin)
-        y1 = min(h, max(b[3] for b in boxes) + margin)
-        if x1 - x0 < minsize:
-            mid = (x0 + x1) // 2
-            x0 = max(0, mid - minsize // 2)
-            x1 = min(w, x0 + minsize)
+        y0 = max(0, min(b[0] for b in bands) - margin)
+        y1 = min(h, max(b[1] for b in bands) + margin)
         if y1 - y0 < minsize:
             mid = (y0 + y1) // 2
             y0 = max(0, mid - minsize // 2)
             y1 = min(h, y0 + minsize)
-        return x0, y0, x1, y1
+        return y0, y1
 
 
     def _on_enable(self, request, response):

@@ -224,6 +224,8 @@ class PoseNode(Node):
         if not all_points:
             self._publish_empty(det_msg.header.stamp)
             return
+        per_box = [_TargetPoint(cx=p.cx, cy=p.cy, class_id=p.class_id, pt_3d=p.pt_3d)
+                    for p in (blue_3d + green_3d + other_3d)]
 
         center = np.mean([p.pt_3d for p in all_points], axis=0)
         target_yaw = math.degrees(math.atan2(center[0], center[2]))
@@ -239,6 +241,7 @@ class PoseNode(Node):
             target_pitch,
             target_roll,
             len(all_points),
+            per_box,
         )
 
         self._pose_counter += 1
@@ -258,6 +261,7 @@ class PoseNode(Node):
         pitch,
         roll,
         detection_count,
+        per_box=None,
     ):
         roll_value = roll if roll is not None else 0.0
         raw = [
@@ -315,7 +319,7 @@ class PoseNode(Node):
             float(roll_f),
             float(detection_count),
             1.0,
-        ]
+        ] + self._per_box_values(per_box)
         self._last_details = details
         self.pose_pub.publish(pose)
         self.details_pub.publish(details)
@@ -430,6 +434,25 @@ class PoseNode(Node):
             sphere.color.b = 0.0
             markers.markers.append(sphere)
         return markers
+
+    def _per_box_values(self, per_box):
+        vals = [0.0, 0.0]
+        if per_box:
+            vals[0] = float(len(per_box))
+            for point in per_box:
+                pt_3d = point.pt_3d
+                yaw = math.degrees(math.atan2(pt_3d[0], pt_3d[2]))
+                pitch = math.degrees(math.atan2(-pt_3d[1], pt_3d[2]))
+                vals += [
+                    float(point.cx),
+                    float(point.cy),
+                    float(yaw),
+                    float(pitch),
+                    float(pt_3d[2]),
+                ]
+        else:
+            vals[0] = 0.0
+        return vals
 
     def _on_get_pose(self, request, response):
         if not self._last_detected or self._last_details is None:

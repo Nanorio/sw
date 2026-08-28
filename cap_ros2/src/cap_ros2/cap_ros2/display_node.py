@@ -143,14 +143,15 @@ class DisplayNode(Node):
         else:
             frame = None
         if frame is not None and self._detections is not None:
-            self._draw_detections(frame, self._detections)
+            details_for_draw = self._pose_details if self._pose_details is not None else None
+            self._draw_detections(frame, self._detections, details_for_draw)
         if frame is not None and self._pose_details is not None and self._is_detected(
             self._pose_details
         ):
             self._overlay_pose(frame, self._pose_details)
         return frame
 
-    def _draw_detections(self, frame, det_msg):
+    def _draw_detections(self, frame, det_msg, details=None):
         h_i, w_i = frame.shape[:2]
         cx_i, cy_i = 331, 234
         cv2.line(frame, (cx_i, 0), (cx_i, h_i - 1), (0, 255, 0), 1)
@@ -188,6 +189,8 @@ class DisplayNode(Node):
             cv2.putText(frame, "GreenLight", (pt[0] + 10, pt[1]),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
 
+        self._draw_per_box_labels(frame, details)
+
         for g_pt in green_pts:
             for b_pt in blue_pts:
                 cv2.line(frame, g_pt, b_pt, (255, 255, 255), 2)
@@ -208,6 +211,30 @@ class DisplayNode(Node):
             cv2.circle(frame, lpt, 4, (0, 255, 255), -1)
             cv2.circle(frame, rpt, 4, (0, 255, 255), -1)
             cv2.circle(frame, bot, 4, (0, 255, 255), -1)
+
+    def _draw_per_box_labels(self, frame, details):
+        if details is None or len(details.data) < 13:
+            return
+        data = details.data
+        count = int(data[11]) if len(data) > 11 else 0
+        if count <= 0:
+            return
+        idx = 12
+        for _ in range(count):
+            if idx + 4 >= len(data):
+                break
+            cx = data[idx]
+            cy = data[idx + 1]
+            yaw = data[idx + 2]
+            pitch = data[idx + 3]
+            z_mm = data[idx + 4]
+            idx += 5
+            cv2.putText(frame, f"Yaw:{yaw:+.1f} Pitch:{pitch:+.1f}",
+                        (int(cx) + 10, int(cy)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+            cv2.putText(frame, f"Z:{z_mm:.0f}mm",
+                        (int(cx) + 10, int(cy) + 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
 
     def _log_pose_headless(self):
         self._log_counter += 1
