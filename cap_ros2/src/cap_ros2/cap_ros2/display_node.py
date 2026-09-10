@@ -1,4 +1,4 @@
-"""Display node: annotated image, disparity image, raw stereo and pose overlay."""
+"""Display node: annotated image and disparity image."""
 
 from __future__ import annotations
 
@@ -20,12 +20,18 @@ class DisplayNode(Node):
         super().__init__("display_node")
 
         self.declare_parameter("use_window", True)
+        self.declare_parameter("window_x", 20)
+        self.declare_parameter("window_y", 60)
+        self.declare_parameter("window_gap", 30)
         self.use_window = bool(self.get_parameter("use_window").value)
+        self.window_x = int(self.get_parameter("window_x").value)
+        self.window_y = int(self.get_parameter("window_y").value)
+        self.window_gap = int(self.get_parameter("window_gap").value)
+        self._windows_positioned = False
         self._annotated = None
         self._left = None
         self._detections = None
         self._depth = None
-        self._stereo = None
         self._pose_stamped = None
         self._pose_details = None
         self._log_counter = 0
@@ -47,12 +53,6 @@ class DisplayNode(Node):
             self._on_depth,
             sensor_qos,
         )
-        self.stereo_sub = self.create_subscription(
-            CompressedImage,
-            "/cap/camera/stereo_raw",
-            self._on_stereo,
-            sensor_qos,
-        )
         self.pose_sub = self.create_subscription(
             PoseStamped, "/cap/pose/target_pose", self._on_pose, 10
         )
@@ -63,7 +63,10 @@ class DisplayNode(Node):
             10,
         )
         self.timer = self.create_timer(1.0 / 30.0, self.render)
-        self.get_logger().info(f"display_node ready, use_window={self.use_window}")
+        self.get_logger().info(
+            "display_node ready, "
+            f"use_window={self.use_window}"
+        )
 
     def _on_left(self, msg):
         try:
@@ -80,12 +83,6 @@ class DisplayNode(Node):
         except Exception as exc:
             self.get_logger().error(f"Depth decode failed: {exc}")
 
-    def _on_stereo(self, msg):
-        try:
-            self._stereo = decode_compressed(msg)
-        except Exception as exc:
-            self.get_logger().error(f"Stereo decode failed: {exc}")
-
     def _on_pose(self, msg):
         self._pose_stamped = msg
 
@@ -98,18 +95,30 @@ class DisplayNode(Node):
             return
         try:
             frame = self._build_main_frame()
+            self._position_windows(frame)
             if frame is not None:
                 cv2.imshow("CAP Detection", frame)
             if self._depth is not None:
                 cv2.imshow("CAP SGBM Depth", self._depth)
-            if self._stereo is not None:
-                cv2.imshow("CAP Stereo Raw", self._stereo)
             cv2.waitKey(1)
         except cv2.error as exc:
             self.use_window = False
             self.get_logger().warning(
                 f"GUI unavailable, disabling windows: {exc}"
             )
+
+    def _position_windows(self, frame):
+        if self._windows_positioned or frame is None:
+            return
+        cv2.namedWindow("CAP Detection", cv2.WINDOW_AUTOSIZE)
+        cv2.namedWindow("CAP SGBM Depth", cv2.WINDOW_AUTOSIZE)
+        cv2.moveWindow("CAP Detection", self.window_x, self.window_y)
+        cv2.moveWindow(
+            "CAP SGBM Depth",
+            self.window_x + frame.shape[1] + self.window_gap,
+            self.window_y,
+        )
+        self._windows_positioned = True
 
     @staticmethod
     def _overlay_pose(frame, pose):

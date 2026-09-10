@@ -1,0 +1,31 @@
+formation_observation_node:
+  ros__parameters:
+    camera_extrinsics_path: camera_extrinsics.yaml
+    formation_templates_path: formation_templates.yaml
+    self_slot_id: 1
+    formation_id: 0
+    formation_id_topic: /cap/formation/id
+
+    # Preferred future input: one PointStamped per camera.
+    # Coordinates in PointStamped are camera-frame millimeters.
+    camera_point_topics:
+      - /cap/formation/camera_0/point
+      - /cap/formation/camera_1/point
+      - /cap/formation/camera_2/point
+
+    # Compatibility input for the current pose_node.
+    # pose_node details are [robot xyz, camera xyz, ypr, ...].
+    # legacy_details_topic + legacy_details_camera_id can override this
+    # list from the launch file when there is only one pose_node output.
+    # Keep this disabled when pose_node publishes /cap/formation/camera_N/point.
+    legacy_details_topic: ""
+    legacy_details_camera_id: 0
+    legacy_details_topics:
+      - ""
+      - ""
+      - ""
+
+    stale_timeout_sec: 0.8
+    publish_tf: true
+    axis_length_mm: 500.0
+    camera_axis_length_mm: 180.0

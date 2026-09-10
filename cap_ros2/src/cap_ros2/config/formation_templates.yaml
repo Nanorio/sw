@@ -1,0 +1,18 @@
+# Formation slot templates.
+# Values are literal millimeters in the robot body frame.
+# The template origin is arbitrary; the node subtracts self_slot_id.
+
+unit: mm
+
+formation:
+  - id: 0
+    slots:
+      0: [0, 0, 0]
+      1: [-5, -10, 0]
+      2: [5, -10, 0]
+
+  - id: 1
+    slots:
+      0: [0, 0, 0]
+      1: [-10, 0, 0]
+      2: [10, 0, 0]

@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import rclpy
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
@@ -105,6 +105,11 @@ class PoseNode(Node):
         )
         self.details_pub = self.create_publisher(
             Float64MultiArray, "/cap/pose/target_pose_details", 10
+        )
+        self.formation_point_pub = self.create_publisher(
+            PointStamped,
+            f"/cap/formation/camera_{self.active_cam_id}/point",
+            10,
         )
         self.pose_srv = self.create_service(
             Trigger, "/cap/pose/get_target_pose", self._on_get_pose
@@ -363,6 +368,7 @@ class PoseNode(Node):
         self._last_details = details
         self.pose_pub.publish(pose)
         self.details_pub.publish(details)
+        self._publish_formation_point(header.stamp, center_f)
         self._trajectory.append([
             float(abs_pt_f[0]) / 1000.0,
             float(abs_pt_f[1]) / 1000.0,
@@ -371,6 +377,15 @@ class PoseNode(Node):
         if len(self._trajectory) > self._max_trajectory_pts:
             self._trajectory = self._trajectory[-self._max_trajectory_pts:]
         self.marker_pub.publish(self._build_markers(header.stamp))
+
+    def _publish_formation_point(self, stamp, center_f):
+        point = PointStamped()
+        point.header.stamp = stamp
+        point.header.frame_id = f"cap_camera_{self.active_cam_id}"
+        point.point.x = float(center_f[0])
+        point.point.y = float(center_f[1])
+        point.point.z = float(center_f[2])
+        self.formation_point_pub.publish(point)
 
     @staticmethod
     def _euler_to_quaternion(yaw, pitch, roll):

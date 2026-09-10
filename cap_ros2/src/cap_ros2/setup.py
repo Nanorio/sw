@@ -29,6 +29,7 @@ setup(
             "sgbm_node = cap_ros2.sgbm_node:main",
             "pose_node = cap_ros2.pose_node:main",
             "display_node = cap_ros2.display_node:main",
+            "formation_observation_node = cap_ros2.formation_observation_node:main",
         ],
     },
 )

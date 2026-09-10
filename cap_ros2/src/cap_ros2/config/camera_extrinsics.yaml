@@ -1,0 +1,44 @@
+# Camera extrinsics in the robot body frame.
+# Units: mm.
+#
+# Robot frame:
+#   +X = robot right
+#   +Y = robot forward
+#   +Z = vertically up
+#
+# Camera frame follows OpenCV:
+#   +Xc = image right
+#   +Yc = image down
+#   +Zc = optical axis forward
+#
+# The default positions are converted from the old camera_setup.yaml
+# convention [X right, Y up, Z forward] into [X right, Y forward, Z up].
+# Verify these three position_mm values against the real mounting geometry.
+
+unit: mm
+robot_frame: robot_base
+
+cameras:
+  0:
+    name: head
+    position_mm: [0, 500, 0]
+    rotation_camera_to_robot:
+      - [1, 0, 0]
+      - [0, 0, 1]
+      - [0, -1, 0]
+
+  1:
+    name: left
+    position_mm: [-500, 0, 0]
+    rotation_camera_to_robot:
+      - [0, 0, -1]
+      - [1, 0, 0]
+      - [0, -1, 0]
+
+  2:
+    name: right
+    position_mm: [500, 0, 0]
+    rotation_camera_to_robot:
+      - [0, 0, 1]
+      - [-1, 0, 0]
+      - [0, -1, 0]
